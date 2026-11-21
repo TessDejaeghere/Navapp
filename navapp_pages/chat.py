@@ -97,7 +97,11 @@ def show_stats(results: list[dict], key: str) -> None:
             st.caption(f"Basis: {r.get('basis', '')}")
 
 
-searcher = get_searcher(current_dir().name)
+try:
+    searcher = get_searcher(current_dir().name)
+except FileNotFoundError as e:
+    st.error(f"The chatbot has no index yet. {e}")
+    st.stop()
 lo, hi = searcher.year_range()
 
 with st.sidebar:

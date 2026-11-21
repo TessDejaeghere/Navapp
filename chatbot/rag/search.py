@@ -38,6 +38,10 @@ class Searcher:
     def __init__(self, use_reranker: bool = True):
         from .indexer import current_dir
         d = current_dir()
+        if not (d / "chunks.db").exists():
+            raise FileNotFoundError(
+                f"No chatbot index in {d}. Copy chatbot/data from the research repo or the desktop package, "
+                "or build it with chatbot/scripts/build_corpus.py and build_index.py.")
         self.version = d.name
         self.con = sqlite3.connect(d / "chunks.db", check_same_thread=False)
         have = {r[1] for r in self.con.execute("PRAGMA table_info(chunks)")}
