@@ -1,0 +1,16 @@
+streamlit>=1.50
+pandas
+numpy
+requests
+openai
+pillow
+rapidfuzz
+jellyfish
+transformers
+safetensors
+sentence-transformers
+huggingface_hub
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch
+# only for the standalone chatbot (chatbot/app/chainlit_app.py)
+chainlit

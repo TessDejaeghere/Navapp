@@ -1,0 +1,6 @@
+﻿# local-only files
+.env
+openrouter_key.txt
+data/history.db
+data/exports/
+.files/

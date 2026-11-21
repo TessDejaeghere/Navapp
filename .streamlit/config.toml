@@ -1,0 +1,38 @@
+[server]
+port = 8501
+address = "0.0.0.0"
+headless = true
+enableCORS = false
+enableXsrfProtection = true
+# pipeline_app.py accepts multi-letter scan zips; KBR/phone scans run ~2-5 MB
+# per page, so a season of letters easily exceeds 1 GB
+maxUploadSize = 4096
+
+[browser]
+gatherUsageStats = false
+serverAddress = "localhost"
+serverPort = 8501
+
+[theme]
+# Navapp: letter paper and ink, with the gold of the logo frame as accent
+base = "light"
+primaryColor = "#8A6534"
+backgroundColor = "#F7F1E6"
+secondaryBackgroundColor = "#EDE2CF"
+textColor = "#3F352C"
+linkColor = "#7A5528"
+borderColor = "#D8C7A9"
+font = "sans serif"
+headingFont = "serif"
+
+[theme.sidebar]
+backgroundColor = "#EFE5D3"
+secondaryBackgroundColor = "#E4D6BD"
+
+[runner]
+magicEnabled = true
+fastReruns = true
+
+[client]
+showErrorDetails = true
+toolbarMode = "minimal"

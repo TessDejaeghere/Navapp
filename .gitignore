@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# keys and secrets: never commit
+config/
+openrouter_key.txt
+.env
+*.key
+
+# data, model and index (not in this repo; see README "Data and model")
+data/
+NER_pipeline/ckpts/
+NER_pipeline/eval/
+CLUSTERING_pipeline/glossary/
+CLUSTERING_pipeline/*.csv
+chatbot/data/
+chatbot/.files/
+chatbot/.chainlit/translations/
+dist/
+
+# editors and OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
