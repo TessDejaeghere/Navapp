@@ -11,7 +11,7 @@ import re
 CHUNK_CHARS = 1600      # letters are short: most fit in one chunk
 OVERLAP_CHARS = 250
 OTHER_LABELS = {"LOC": "places", "ORG": "organisations", "ART": "artworks", "EVT": "events"}
-LIST_FIELDS = ["persons_linked", "persons_mentioned", "places", "organisations", "artworks", "events"]
+LIST_FIELDS = ["persons_linked", "persons_checked", "persons_mentioned", "places", "organisations", "artworks", "events"]
 
 
 def year_of(date: str) -> int | None:
@@ -82,6 +82,7 @@ def make_chunks(letter_id: str, text: str, meta: dict, persons: list[dict],
             "date": clean(str(meta.get("date", "") or "")), "year": year_of(meta.get("date", "")),
             "archive": clean(meta.get("archive", "")), "permalink": meta.get("permalink", "") or "",
             "text_source": text_source, "text": text[a:b].strip(),
+            "start": a + len(text[a:b]) - len(text[a:b].lstrip()),   # offset of the chunk in the letter
             # suggested links are machine output: shown as such in the apps
             "persons_linked": unique(p["person"] for p in per if p.get("person")),
             "persons_mentioned": unique(clean(p["surface"]) for p in per),
@@ -97,8 +98,9 @@ def header(c: dict) -> str:
     """Metadata line prepended to each chunk for search and embedding."""
     parts = [f"Letter from {c['sender'] or 'unknown sender'} to {c['recipient'] or 'unknown recipient'}",
              f"date {c['date'] or 'unknown'}"]
-    if c["persons_linked"] or c["persons_mentioned"]:
-        parts.append("persons: " + ", ".join(c["persons_linked"] + c["persons_mentioned"]))
+    persons = c.get("persons_checked", []) + c["persons_linked"] + c["persons_mentioned"]
+    if persons:
+        parts.append("persons: " + ", ".join(persons))
     for f in ("places", "organisations", "artworks", "events"):
         if c[f]:
             parts.append(f"{f}: " + ", ".join(c[f]))

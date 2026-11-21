@@ -119,6 +119,8 @@ def _source_text(i: int, r: dict) -> str:
              f"**{r['sender'] or 'onbekend'}** aan **{r['recipient'] or 'onbekend'}** · {r['date'] or 'datum onbekend'}",
              f"*Transcriptie: {SOURCE_LABEL.get(r['text_source'], r['text_source'])} · relevantie {r.get('confidence', 0):.0%}*",
              "", r["text"], ""]
+    if r.get("persons_checked"):
+        lines.append("**Personen (nagekeken):** " + ", ".join(r["persons_checked"]))
     if r["persons_linked"]:
         lines.append("**Gekoppelde personen (automatische suggestie):** " + ", ".join(r["persons_linked"]))
     for label, f in (("Plaatsen", "places"), ("Instellingen", "organisations"), ("Kunstwerken", "artworks"), ("Gebeurtenissen", "events")):

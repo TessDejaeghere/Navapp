@@ -38,6 +38,8 @@ FILES = [
     "chatbot/rag/__init__.py",
     "chatbot/rag/agent.py",
     "chatbot/rag/stats.py",
+    "chatbot/rag/corrections.py",
+    "chatbot/rag/memory.py",
     "data/nodegoat_export_2106.csv",                # letter metadata for counting questions
     "chatbot/rag/answer.py",
     "chatbot/rag/corpus.py",
@@ -49,6 +51,11 @@ FILES = [
     "chatbot/data/index/CURRENT",
     "chatbot/data/index/embed_cache.sqlite",        # so rebuilds on Fien's machine only embed new letters
     "start_navapp.bat",
+    "assets/navapp_logo.png",
+    "assets/navapp_frame.png",
+    "assets/navapp_icon.png",
+    "assets/navapp_mark.png",
+    "assets/navapp_wordmark.png",
     ".streamlit/config.toml",
     "HTR_pipeline/run_htr_opus.py",
     "HTR_pipeline/download_kbr_iiif_batch2.py",
@@ -66,7 +73,8 @@ DIRS = [
     "NER_pipeline/ckpts/dalembert_fold2/checkpoint-450",
 ]
 # Copied when present: letters already sent to the chatbot from this machine.
-OPTIONAL_FILES = ["chatbot/data/corpus/uploads.jsonl", "data/nodegoat_letters_export.csv"]
+OPTIONAL_FILES = ["chatbot/data/corpus/uploads.jsonl", "data/nodegoat_letters_export.csv",
+                  "chatbot/data/corrections/person_mentions.jsonl", "chatbot/data/corrections/imports.json"]
 
 
 def chatbot_index_dir() -> str:
@@ -149,7 +157,17 @@ Navapp has three pages (left sidebar):
 - **Chatbot**: ask questions about the letters in Dutch, English or French. Every answer
   cites its letters as [#n]; open a source to read the fragment and follow the KBR link.
   About $0.02 per answer.
-- **Chatbot data**: see which letters you sent, and remove them again if needed.
+  Conversations are saved (reopen them in the sidebar). When you correct the chatbot on a
+  fact ("that letter is by Alexandre Robert, not Portaels"), it remembers the correction in
+  all later conversations.
+- **Chatbot data**: see which letters you sent and remove them again; upload your cleaned
+  OpenRefine export (surface_v2, ID_Nodegoat, Notes, Source_v2, Target_v2) so the chatbot uses
+  your checked persons; see, edit or delete the corrections the chatbot remembers.
+
+## Updating Navapp
+When you receive a new version, keep your own `chatbot/data` folder: it holds the letters you
+sent, your OpenRefine corrections, saved conversations and remembered corrections. Copy the
+new files over the old ones, but do not replace `chatbot/data`.
 
 ## Updating the person list
 

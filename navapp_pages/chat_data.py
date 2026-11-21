@@ -15,10 +15,11 @@ st.caption("The chatbot searches the research corpus plus the letters you sent f
 
 chunks, _ = indexer.all_chunks()
 uploads = ingest.uploaded_letters()
-c1, c2, c3 = st.columns(3)
+c1, c2, c3, c4 = st.columns(4)
 c1.metric("Letters in the chatbot", f"{len({c['letter_id'] for c in chunks}):,}")
 c2.metric("Sent from Navapp", f"{len(uploads):,}")
-c3.metric("Index version", indexer.current_dir().name)
+c3.metric("With checked persons", f"{len({c['letter_id'] for c in chunks if 'persons_checked' in c}):,}")
+c4.metric("Index version", indexer.current_dir().name)
 
 st.subheader("Letters you sent")
 if not uploads:
@@ -35,6 +36,91 @@ else:
         st.rerun()
 if msg := st.session_state.pop("removed_msg", None):
     st.success(msg)
+
+st.subheader("Checked persons (OpenRefine export)")
+from rag import corrections  # noqa: E402
+
+st.caption("Upload the mention CSV you cleaned in OpenRefine (with **surface_v2**, ID_Nodegoat, Notes, Source_v2, "
+           "Target_v2). For the letters in that file, your persons replace the automatic links in the chatbot: "
+           "a nodegoat name or ID links the mention to that person, another name in surface_v2 is kept as a name, "
+           "DEL / Geen PER removes it, GRP and ALG keep it without a person, ART and LOC move it to artworks and "
+           "places. Your corrected sender and recipient are used as well. A newer export of the same letters "
+           "replaces the older one; letters from other batches are kept.")
+done = corrections.imports()
+if done:
+    st.dataframe(pd.DataFrame(done)[["file", "imported", "letters", "mentions", "linked", "named", "deleted"]],
+                 width="stretch", hide_index=True)
+corr_up = st.file_uploader("OpenRefine export (CSV)", type=["csv"], key="openrefine_export")
+if corr_up is not None:
+    try:
+        records, summary = corrections.normalise(corrections.read_export(corr_up.getvalue()))
+    except ValueError as e:
+        st.error(str(e))
+    else:
+        c1, c2, c3, c4 = st.columns(4)
+        c1.metric("Letters", f"{summary['letters']:,}")
+        c2.metric("Linked to a nodegoat person", f"{summary.get('linked', 0):,}",
+                  help=f"{summary['persons']:,} different persons")
+        c3.metric("Named, without nodegoat ID", f"{summary.get('named', 0):,}")
+        c4.metric("Removed (DEL / not a person)", f"{summary.get('deleted', 0):,}")
+        st.caption(f"Also: {summary.get('group', 0)} groups, {summary.get('generic', 0)} generic, "
+                   f"{summary.get('artwork', 0)} artworks, {summary.get('place', 0)} places, "
+                   f"{summary.get('open', 0):,} mentions left as they were (kept as a name in the text, "
+                   "without a person).")
+        if st.button(f"✅ Use these corrections for {summary['letters']:,} letters", type="primary"):
+            corrections.save(records, summary, corr_up.name)
+            bar = st.progress(0.0, "Updating the index …")
+            try:
+                s3 = indexer.rebuild_index(progress=lambda f, m: bar.progress(min(max(f, 0.0), 1.0), m))
+                st.session_state.corr_msg = (f"Corrections saved; index {s3['version']} rebuilt "
+                                             f"({s3['newly_embedded']} fragments re-embedded, ${s3['cost_usd']:.3f}).")
+            except RuntimeError as e:
+                st.session_state.corr_msg = f"Corrections saved, but the index could not be rebuilt: {e}"
+            st.rerun()
+if msg := st.session_state.pop("corr_msg", None):
+    st.success(msg)
+if done and st.button("Remove all corrections (back to the automatic links)"):
+    corrections.clear()
+    with st.spinner("Updating the index …"):
+        indexer.rebuild_index()
+    st.rerun()
+
+st.subheader("What the chatbot remembers")
+from rag import memory  # noqa: E402
+
+notes = memory.load_notes()
+st.caption("Facts you corrected in the chat. Every later answer uses them, and they take precedence over the "
+           "metadata, the automatic links and the transcriptions. They do not change the counts: correct "
+           "those in nodegoat and upload a new export below.")
+if not notes:
+    st.info("No corrections yet. Correct the chatbot in the chat (e.g. \"That letter was written by Alexandre "
+            "Robert, not Louis-Léopold\") or add one here.")
+for n in sorted(notes, key=lambda x: x["created"], reverse=True):
+    with st.expander(f"{n['created'][:10]} · {n['author']} · {n['fact'][:90]}"):
+        fact = st.text_area("Correction", n["fact"], key=f"fact_{n['id']}")
+        letters = st.text_input("Letters (comma-separated)", ", ".join(n["letter_ids"]), key=f"let_{n['id']}")
+        if n.get("question"):
+            st.caption(f"Saved while answering: *{n['question']}*")
+        b1, b2 = st.columns(2)
+        if b1.button("💾 Save", key=f"save_{n['id']}"):
+            memory.update_note(n["id"], fact=" ".join(fact.split()),
+                               letter_ids=[x.strip() for x in letters.split(",") if x.strip()])
+            st.rerun()
+        if b2.button("🗑 Delete", key=f"del_{n['id']}"):
+            memory.delete_note(n["id"])
+            st.rerun()
+with st.form("add_note", clear_on_submit=True):
+    st.markdown("**Add a correction**")
+    fact = st.text_area("Correction (one full sentence)", placeholder="Ms. II 70/1/184 was written by Alexandre "
+                        "Robert, not by Jean François Portaels.")
+    letters = st.text_input("Letters (comma-separated, optional)")
+    who = st.text_input("Your name", value=st.session_state.get("author", ""))
+    if st.form_submit_button("➕ Remember"):
+        try:
+            memory.add_note(fact, [x for x in letters.split(",")], author=who.strip())
+            st.rerun()
+        except ValueError as e:
+            st.error(str(e))
 
 st.subheader("Metadata for counting questions")
 from rag import stats  # noqa: E402

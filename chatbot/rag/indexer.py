@@ -23,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from .corpus import LIST_FIELDS, embed_text, header
+from . import corrections
 from .ingest import load_uploads
 from .stats import build_stats_tables
 
@@ -57,7 +58,9 @@ def all_chunks() -> tuple[list[dict], int]:
     if CORPUS.exists():
         with CORPUS.open(encoding="utf-8") as fh:
             base = [c for c in (json.loads(line) for line in fh) if c["letter_id"] not in replaced]
-    return base + uploads, len(uploads)
+    chunks = base + uploads
+    corrections.apply(chunks)   # Fien's checked persons replace the automatic links of those letters
+    return chunks, len(uploads)
 
 
 # -- embedding cache ------------------------------------------------------------

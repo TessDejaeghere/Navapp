@@ -12,7 +12,7 @@ import re
 from .answer import SOURCE_LABEL, _context_block
 from .openrouter import chat_with_tools
 from .search import Searcher
-from . import stats
+from . import memory, stats
 
 MAX_ROUNDS = 6
 
@@ -44,9 +44,16 @@ korte Franse citaten met vertaling, ongecorrigeerde HTR en gekoppelde personen v
 7. Gebruik voor elk getal in je antwoord een tabel-tool (count_letters, letters_per_year, \
 top_people, top_entities of list_letters), ook als find_person al aantallen toont: de \
 onderzoeker krijgt die tabellen te zien als bewijs.
-8. Gebruik search_letters hoogstens twee keer per vraag.
+8. Gebruik search_letters hoogstens twee keer per vraag. Gaat de vraag over één brief-ID, lees die brief met search_letters(letter_id=...) en haal de metadata op met list_letters(letter_id=...).
 9. Begin meteen met het antwoord, zonder zinnen over je werkwijze ("Nu heb ik…").
-10. Antwoord in de taal van de vraag, helder en beknopt."""
+10. Antwoord in de taal van de vraag (een Engelse vraag krijgt een Engels antwoord), helder en beknopt.
+11. Corrigeert of vult de onderzoeker een FEIT aan over de brieven, personen of metadata (bv. "die brief \
+is van Alexandre Robert, niet van Louis-Léopold"), roep dan remember_correction aan: de correctie als \
+één zelfstandige, volledige zin (wie, wat, welke brief), met de betrokken brief-ID's en personen. \
+Bevestig daarna kort dat je het onthouden hebt. Niet bij vragen, twijfels of meningen, en niet als de \
+onderzoeker iets bevestigt wat al klopt. Is de correctie onduidelijk, vraag dan eerst wat bedoeld wordt.
+12. Correcties van het onderzoeksteam gaan voor op metadata, automatische koppelingen en transcripties. \
+Ze veranderen de statistiek-tabellen niet: zeg het als een correctie een getal zou beïnvloeden."""
 
 MAX_SEARCHES = 2
 
@@ -58,6 +65,7 @@ _FILTERS = {
     "year_from": {"type": "integer"}, "year_to": {"type": "integer"},
     "archive": {"type": "string", "description": "part of the archive name, e.g. KBR, Neuchâtel"},
     "only_with_text": {"type": "boolean", "description": "only letters that have a transcription"},
+    "letter_id": {"type": "string", "description": "one specific letter, e.g. Ms. II 70/1/184"},
 }
 
 
@@ -69,6 +77,7 @@ def _tool(name: str, description: str, props: dict, required: list[str] | None =
 TOOLS = [
     _tool("search_letters", "Search letter fragments by content (any language). Returns numbered fragments to cite.",
           {"query": {"type": "string"}, "k": {"type": "integer", "description": "fragments, default 8"},
+           "letter_id": {"type": "string", "description": "read this one letter (all its fragments) instead of searching"},
            "sender_id": _FILTERS["sender_id"], "year_from": _FILTERS["year_from"], "year_to": _FILTERS["year_to"]},
           ["query"]),
     _tool("find_person", "Resolve a name as written in the question to persons in the nodegoat person list, with "
@@ -85,11 +94,32 @@ TOOLS = [
     _tool("list_letters", "List the letters matching the filters (date, sender, recipient, archive).",
           {"limit": {"type": "integer"}, **_FILTERS}),
     _tool("collection_overview", "Total number of letters, how many are transcribed, and per archive.", {}),
+    _tool("remember_correction", "Store a correction of a fact, given by the researcher, so that it is used in all "
+          "later conversations.",
+          {"fact": {"type": "string", "description": "the corrected fact as one self-contained sentence"},
+           "letter_ids": {"type": "array", "items": {"type": "string"},
+                          "description": "letters concerned, e.g. Ms. II 70/1/181"},
+           "persons": {"type": "array", "items": {"type": "string"}, "description": "persons concerned (full names)"}},
+          ["fact"]),
 ]
 
 
-def _run_tool(name: str, args: dict, searcher: Searcher, sources: list[dict], ui_filters: dict) -> dict:
+def _fragment(i: int, r: dict) -> str:
+    """A fragment for the model, with any correction the research team made about that letter."""
+    notes = memory.notes_for_letter(r["letter_id"])
+    return _context_block(i, r) + "".join(f"\nCorrectie onderzoeksteam: {n['fact']}" for n in notes)
+
+
+def _run_tool(name: str, args: dict, searcher: Searcher, sources: list[dict], ui_filters: dict,
+              ctx: dict | None = None) -> dict:
     con = searcher.con
+    if name == "remember_correction":
+        ctx = {} if ctx is None else ctx
+        note = memory.add_note(args.get("fact", ""), args.get("letter_ids"), args.get("persons"),
+                               author=ctx.get("author", ""), question=ctx.get("question", ""),
+                               conversation_id=ctx.get("conversation_id", ""))
+        ctx.setdefault("remembered", []).append(note)
+        return {"saved": True, "id": note["id"]}
     if name == "search_letters":
         if sum(1 for r in sources if r.get("_first")) >= MAX_SEARCHES:
             return {"fragments": "Zoeklimiet bereikt: beantwoord de vraag met de fragmenten die je al hebt."}
@@ -98,12 +128,20 @@ def _run_tool(name: str, args: dict, searcher: Searcher, sources: list[dict], ui
             flt["correspondent"] = stats._person_label(con, args["sender_id"])
         if args.get("year_from") or args.get("year_to"):
             flt["years"] = (int(args.get("year_from") or 1700), int(args.get("year_to") or 1900))
-        found = searcher.search(args["query"], k=min(int(args.get("k") or 8), 10), **flt)
+        if args.get("letter_id"):   # read one letter: all its fragments, in order
+            rows = con.execute("SELECT rowid FROM chunks WHERE lower(letter_id) = lower(?) ORDER BY chunk",
+                               (args["letter_id"].strip(),)).fetchall()
+            found = [searcher._record(r[0]) for r in rows[:6]]
+            if not found:
+                return {"fragments": "Deze brief heeft geen transcriptie in de chatbot (gebruik list_letters "
+                                     "met letter_id voor de metadata)."}
+        else:
+            found = searcher.search(args["query"], k=min(int(args.get("k") or 8), 10), **flt)
         if found:
             found[0]["_first"] = True   # marks the start of one search, for the search limit
         start = len(sources)
         sources.extend(found)
-        return {"fragments": "\n\n".join(_context_block(start + i, r) for i, r in enumerate(found, 1))
+        return {"fragments": "\n\n".join(_fragment(start + i, r) for i, r in enumerate(found, 1))
                 or "Geen fragmenten gevonden."}
     fn = {"find_person": stats.find_person, "count_letters": stats.count_letters,
           "letters_per_year": stats.letters_per_year, "top_people": stats.top_people,
@@ -138,8 +176,9 @@ def stats_markdown(results: list[dict]) -> str:
 
 
 def answer_with_tools(query: str, searcher: Searcher, model: str = "anthropic/claude-sonnet-4.5",
-                      history: list[dict] | None = None, k: int = 8, **ui_filters) -> dict:
-    """Returns {answer, sources (for [#n]), stats [{tool, args, result}], cost}."""
+                      history: list[dict] | None = None, k: int = 8, author: str = "",
+                      conversation_id: str = "", **ui_filters) -> dict:
+    """Returns {answer, sources (for [#n]), stats [{tool, args, result}], remembered [notes], cost}."""
     ui_filters = {key: v for key, v in ui_filters.items() if v is not None}
     navez = searcher.con.execute("SELECT person_id FROM persons WHERE name = ?", (stats.NAVEZ,)).fetchone()
     system = SYSTEM + (
@@ -147,6 +186,9 @@ def answer_with_tools(query: str, searcher: Searcher, model: str = "anthropic/cl
         f"recipient_id {navez[0]}; \"brieven van Navez aan X\" = sender_id {navez[0]} EN recipient_id X. "
         "Laat die tweede filter nooit weg: niet alle brieven in de collectie zijn aan Navez gericht."
         if navez else "")
+    recent = " ".join([query] + [h["content"] for h in (history or [])[-2:]])
+    system += memory.notes_prompt(memory.relevant_notes(recent))
+    ctx = {"author": author, "question": query, "conversation_id": conversation_id}
     messages = [{"role": "system", "content": system}] + (history or []) + [{"role": "user", "content": query}]
     sources, results, cost = [], [], 0.0
     for _ in range(MAX_ROUNDS):
@@ -158,18 +200,19 @@ def answer_with_tools(query: str, searcher: Searcher, model: str = "anthropic/cl
             cited = {int(n) for grp in re.findall(r"\[#([\d#,\s]+)\]", text) for n in re.findall(r"\d+", grp)}
             for i, r in enumerate(sources, 1):
                 r["cited"] = i in cited
-            return {"answer": text, "sources": sources, "stats": results, "cost": cost}
+            return {"answer": text, "sources": sources, "stats": results, "cost": cost,
+                    "remembered": ctx.get("remembered", [])}
         messages.append({"role": "assistant", "content": msg.get("content") or "", "tool_calls": calls})
         for call in calls:
             name = call["function"]["name"]
             try:
                 args = json.loads(call["function"].get("arguments") or "{}")
-                out = _run_tool(name, args, searcher, sources, ui_filters)
+                out = _run_tool(name, args, searcher, sources, ui_filters, ctx)
             except Exception as e:  # noqa: BLE001 - report tool errors back to the model
                 args, out = {}, {"error": f"{type(e).__name__}: {e}"}
-            if name not in ("search_letters", "find_person") and "error" not in out:
+            if name not in ("search_letters", "find_person", "remember_correction") and "error" not in out:
                 results.append({"tool": name, "args": args, "result": out})
             messages.append({"role": "tool", "tool_call_id": call["id"],
                              "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]})
     return {"answer": "Ik kon geen antwoord samenstellen binnen het maximale aantal stappen.",
-            "sources": sources, "stats": results, "cost": cost}
+            "sources": sources, "stats": results, "cost": cost, "remembered": ctx.get("remembered", [])}

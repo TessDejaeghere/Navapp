@@ -26,8 +26,9 @@ GLOSSARY = REPO / "CLUSTERING_pipeline" / "glossary" / "PERSON_export_2708.csv"
 LETTER_EXPORTS = [REPO / "data" / "nodegoat_letters_export.csv", REPO / "data" / "nodegoat_export_2106.csv"]
 NAVEZ = "François-Joseph Navez (1787-1869)"
 BASIS_METADATA = "Fien's nodegoat metadata (exact, includes letters without a transcription)"
-BASIS_MENTIONS = ("automatic entity recognition and person linking on the transcribed letters only "
-                  "(an estimate: missed or wrongly linked names are possible)")
+BASIS_MENTIONS = ("person mentions in the transcribed letters only: checked by the research team where corrected, "
+                  "automatic entity recognition and linking elsewhere (an estimate: missed or wrongly linked "
+                  "names are possible)")
 ENTITY_KINDS = ("places", "organisations", "artworks", "events")
 
 csv.field_size_limit(10**9)
@@ -119,7 +120,7 @@ def build_stats_tables(con: sqlite3.Connection, chunks: list[dict]) -> dict:
     text = {}
     for c in chunks:
         t = text.setdefault(letter_key(c["letter_id"]), {"chunk": c, "persons": set(), "ents": set()})
-        t["persons"].update(c.get("persons_linked", []))
+        t["persons"].update(c.get("persons_linked", []) + c.get("persons_checked", []))
         for kind in ENTITY_KINDS:
             t["ents"].update((kind, v) for v in c.get(kind, []))
 
@@ -157,7 +158,10 @@ def _person_label(con: sqlite3.Connection, person_id: str) -> str:
         return row[0]
     row = con.execute("SELECT sender FROM letters WHERE sender_id=? UNION SELECT recipient FROM letters "
                       "WHERE recipient_id=? LIMIT 1", (person_id, person_id)).fetchone()
-    return row[0] if row else person_id
+    if row:
+        return row[0]
+    row = con.execute("SELECT person_name FROM letter_persons WHERE person_id=? LIMIT 1", (person_id,)).fetchone()
+    return row[0] if row else person_id   # a name without nodegoat ID, as the research team wrote it
 
 
 def find_person(con: sqlite3.Connection, name: str, limit: int = 6) -> dict:
@@ -223,6 +227,10 @@ def _where(f: dict) -> tuple[str, list, list[str]]:
         clauses.append("l.archive LIKE ?")
         params.append(f"%{f['archive']}%")
         desc.append(f"archive contains '{f['archive']}'")
+    if f.get("letter_id"):
+        clauses.append("l.letter_key = ?")
+        params.append(letter_key(f["letter_id"]))
+        desc.append(f"letter {f['letter_id']}")
     if f.get("only_with_text"):
         clauses.append("l.has_text = 1")
         desc.append("only letters with a transcription")

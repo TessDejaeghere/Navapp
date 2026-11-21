@@ -16,7 +16,7 @@ INDEX = ROOT / "data" / "index"
 RRF_K = 60
 RERANKER = "cross-encoder/mmarco-mMiniLMv2-L12-H384-v1"
 MAX_CHUNKS_PER_LETTER = 3
-LIST_FIELDS = ["persons_linked", "persons_mentioned", "places", "organisations", "artworks", "events"]
+from .corpus import LIST_FIELDS  # noqa: E402
 COLUMNS = ["rowid", "id", "letter_id", "chunk", "sender", "recipient", "date", "year", "archive",
            "permalink", "text_source", "text"] + LIST_FIELDS
 
@@ -40,6 +40,8 @@ class Searcher:
         d = current_dir()
         self.version = d.name
         self.con = sqlite3.connect(d / "chunks.db", check_same_thread=False)
+        have = {r[1] for r in self.con.execute("PRAGMA table_info(chunks)")}
+        self.columns = [c for c in COLUMNS if c in have]   # older index versions lack newer fields
         self.emb = np.load(d / "embeddings.npy")
         self.meta = json.loads((d / "embeddings_meta.json").read_text(encoding="utf-8"))
         self.use_reranker = use_reranker
@@ -147,7 +149,8 @@ class Searcher:
                 return False
         if person:
             p = fold(person)
-            names = rec["persons_linked"] + rec["persons_mentioned"] + [rec["sender"], rec["recipient"]]
+            names = (rec["persons_checked"] + rec["persons_linked"] + rec["persons_mentioned"]
+                     + [rec["sender"], rec["recipient"]])
             if not any(p in fold(n) for n in names):
                 return False
         return True
@@ -190,8 +193,8 @@ class Searcher:
         return recs[:k]
 
     def _record(self, rowid: int) -> dict:
-        row = self.con.execute(f"SELECT {', '.join(COLUMNS)} FROM chunks WHERE rowid=?", (rowid,)).fetchone()
-        rec = dict(zip(COLUMNS, row))
+        row = self.con.execute(f"SELECT {', '.join(self.columns)} FROM chunks WHERE rowid=?", (rowid,)).fetchone()
+        rec = dict(zip(self.columns, row))
         for f in LIST_FIELDS:
-            rec[f] = json.loads(rec[f]) if rec[f] else []
+            rec[f] = json.loads(rec[f]) if rec.get(f) else []
         return rec

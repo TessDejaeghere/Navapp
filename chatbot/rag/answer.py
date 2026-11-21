@@ -24,7 +24,7 @@ gevonden brieven." Noem eventueel welke fragmenten zijdelings relevant zijn.
 5. Je ziet alleen een selectie van fragmenten, niet de hele collectie. Doe dus geen uitspraken \
 over aantallen of volledigheid ("Navez schreef nooit...", "dit is de enige brief...").
 6. Transcripties gemarkeerd als "ongecorrigeerde HTR" kunnen leesfouten bevatten, vooral in \
-namen. Gekoppelde personen zijn suggesties van een automatisch systeem: noem ze voorzichtig.
+namen. Gekoppelde personen (automatische suggestie) kunnen fout zijn: noem ze voorzichtig. Personen "nagekeken door een onderzoeker" zijn betrouwbaar.
 7. Antwoord in de taal van de vraag, helder en beknopt."""
 
 
@@ -32,8 +32,10 @@ def _context_block(i: int, r: dict) -> str:
     who = f"{r['sender'] or 'onbekende afzender'} aan {r['recipient'] or 'onbekende ontvanger'}"
     head = f"[#{i}] {r['letter_id']} — {who}, {r['date'] or 'datum onbekend'} ({SOURCE_LABEL.get(r['text_source'], r['text_source'])})"
     ents = []
+    if r.get("persons_checked"):
+        ents.append("Personen in dit fragment (nagekeken door een onderzoeker): " + ", ".join(r["persons_checked"]))
     if r["persons_linked"]:
-        ents.append("Gekoppelde personen (suggestie): " + ", ".join(r["persons_linked"]))
+        ents.append("Gekoppelde personen (automatische suggestie): " + ", ".join(r["persons_linked"]))
     if r["places"]:
         ents.append("Plaatsen: " + ", ".join(r["places"]))
     return "\n".join([head, *ents, f"Tekst: {r['text']}"])
@@ -58,6 +60,7 @@ def export_rows(sources: list[dict]) -> list[dict]:
         "brief": r["letter_id"], "afzender": r["sender"], "ontvanger": r["recipient"], "datum": r["date"],
         "transcriptie": SOURCE_LABEL.get(r["text_source"], r["text_source"]),
         "relevantie": r.get("confidence"), "geciteerd": r.get("cited", False),
+        "personen_nagekeken": "; ".join(r.get("persons_checked", [])),
         "personen_gekoppeld": "; ".join(r["persons_linked"]), "plaatsen": "; ".join(r["places"]),
         "tekst": r["text"], "kbr_link": r["permalink"],
     } for r in sources]
