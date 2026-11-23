@@ -3,8 +3,11 @@
 Content questions are answered from letter fragments (cited as [#n]); questions about counts,
 rankings and dates are answered from Fien's nodegoat metadata, with the numbers shown as tables.
 """
+import random
 import re
 import sys
+import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import pandas as pd
@@ -22,6 +25,33 @@ ASSETS = REPO / "assets"
 AVATAR = str(ASSETS / "navapp_icon.png")
 MODELS = {"Claude Sonnet 4.5": "anthropic/claude-sonnet-4.5", "Claude Opus 4.8": "anthropic/claude-opus-4.8"}
 ALL = "All correspondents"
+# Shown in turn while the chatbot searches and counts (one every 2.5 s, in random order).
+WAITING = [
+    "Painting networks",
+    "Searching through health complaints",
+    "Sifting through veuves Poignet",
+    "Looking for castles in Spain",
+    "Breaking the wax seals",
+    "Deciphering Beauvoir's handwriting",
+    "Asking Schnetz for the latest gossip from Rome",
+    "Checking which Robert you meant",
+    "Varnishing the answer (but not before rolling it up)",
+    "Waiting for the diligence from Paris",
+    "Unrolling canvases sent from Rome",
+    "Untangling Monsieur, Madame and Mademoiselle",
+    "Reading between the crossed-out lines",
+    "Counting letters, then counting them again",
+    "Mixing ochre and burnt umber",
+    "Asking Portaels what he saw in Turin",
+    "Bribing the KBR archivist with pralines",
+    "Sharpening the quills",
+    "Dusting off the Salon catalogue",
+    "Consulting David in his Brussels exile",
+    "Following the post via Neuchâtel",
+    "Stretching a fresh canvas",
+    "Complaining about the weather in Rome",
+    "Polishing Navez's wink",
+]
 TOOL_TITLES = {"count_letters": "Count", "letters_per_year": "Letters per year", "top_people": "Ranking of persons",
                "top_entities": "Most frequent", "list_letters": "Letters", "collection_overview": "Collection"}
 
@@ -159,13 +189,26 @@ if question:
     filters = {"correspondent": None if corr == ALL else corr, "person": person.strip() or None,
                "years": None if years == (lo, hi) and undated else years, "include_undated": undated}
     with st.chat_message("assistant", avatar=AVATAR):
-        with st.spinner("Searching and counting …"):
-            try:
-                res = answer_with_tools(question, searcher, model=MODELS[model], history=history,
-                                        author=author.strip(), conversation_id=conv_id, **filters)
-            except RuntimeError as e:
-                res = {"answer": f"⚠️ No answer: {e}. Check the OpenRouter key on the Pipeline page (Settings).",
-                       "sources": [], "stats": []}
+        status = st.empty()
+        with ThreadPoolExecutor(max_workers=1) as pool:   # the answer runs in the background ...
+            job = pool.submit(answer_with_tools, question, searcher, model=MODELS[model], history=history,
+                              author=author.strip(), conversation_id=conv_id, **filters)
+            messages = random.sample(WAITING, len(WAITING))
+            n = 0
+            while not job.done():                         # ... while Navez keeps you entertained
+                status.markdown(f"<span style='opacity:.7'><i>🖌️ {messages[n % len(messages)]} …</i></span>",
+                                unsafe_allow_html=True)
+                n += 1
+                for _ in range(25):                       # 2.5 s per message, but stop as soon as it is done
+                    if job.done():
+                        break
+                    time.sleep(0.1)
+        status.empty()
+        try:
+            res = job.result()
+        except RuntimeError as e:
+            res = {"answer": f"⚠️ No answer: {e}. Check the OpenRouter key on the Pipeline page (Settings).",
+                   "sources": [], "stats": []}
         st.markdown(res["answer"])
         show_remembered(res.get("remembered", []))
         show_stats(res["stats"], key="new")
