@@ -23,9 +23,21 @@ def update_status() -> dict:
     return navapp_update.check()
 
 
+@st.cache_data(ttl=3600, show_spinner=False)
+def shared_status() -> dict:
+    """Asks GitHub at most once an hour whether Fien published new corrections."""
+    sys.path.insert(0, str(Path(__file__).resolve().parent / "chatbot"))
+    from rag import sharing
+    return sharing.check()
+
+
 def update_box() -> None:
     u = update_status()
+    c = shared_status()
     with st.sidebar:
+        if c.get("new"):
+            st.info(f"📢 **{c['by']} published new corrections** ({c['published'][:10]}). Load them on the "
+                    "*Chatbot data* page.")
         if u.get("available"):
             st.info(f"🆕 **A new Navapp is available** ({u['latest']}; you have {u['current']}).\n\n{u['notes']}")
             if st.button("⬇️ Install the update", type="primary"):

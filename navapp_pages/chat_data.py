@@ -96,6 +96,13 @@ if not notes:
     st.info("No corrections yet. Correct the chatbot in the chat (e.g. \"That letter was written by Alexandre "
             "Robert, not Louis-Léopold\") or add one here.")
 for n in sorted(notes, key=lambda x: x["created"], reverse=True):
+    if n.get("shared"):   # published by Fien: read-only here, she corrects it at the source
+        with st.expander(f"📢 {n['created'][:10]} · {n['author']} · {n['fact'][:90]}"):
+            st.markdown(n["fact"])
+            if n["letter_ids"]:
+                st.caption("Letters: " + ", ".join(n["letter_ids"]))
+            st.caption(f"Published by {n.get('published_by') or n['author']}: read-only here.")
+        continue
     with st.expander(f"{n['created'][:10]} · {n['author']} · {n['fact'][:90]}"):
         fact = st.text_area("Correction", n["fact"], key=f"fact_{n['id']}")
         letters = st.text_input("Letters (comma-separated)", ", ".join(n["letter_ids"]), key=f"let_{n['id']}")
@@ -121,6 +128,67 @@ with st.form("add_note", clear_on_submit=True):
             st.rerun()
         except ValueError as e:
             st.error(str(e))
+
+st.subheader("Fien's published corrections")
+from rag import sharing  # noqa: E402
+
+st.caption("Fien is the source for all corrections. When she publishes hers, every Navapp can use them: the facts "
+           "she corrected in the chat and the persons she checked in OpenRefine. Your own corrections stay on "
+           "this computer; for letters you corrected yourself, yours are used.")
+have, remote = sharing.local_manifest(), sharing.check()
+if have:
+    st.markdown(f"In use: published by **{have['by']}** on {have['published'][:16].replace('T', ' ')} "
+                f"({have['notes']} chat corrections, {have['person_letters']:,} letters with checked persons).")
+if remote.get("error"):
+    st.caption(f"Could not look for published corrections ({remote['error']}).")
+elif remote.get("new"):
+    st.info(f"📢 **New corrections from {remote['by']}**, published {remote['published'][:16].replace('T', ' ')}: "
+            f"{remote['notes']} chat corrections, {remote['person_letters']:,} letters with checked persons.")
+    if st.button("⬇️ Use these corrections", type="primary"):
+        bar = st.progress(0.0, "Downloading …")
+        try:
+            sharing.fetch()
+            st.cache_data.clear()   # drop the sidebar's 'new corrections' notice
+            s4 = indexer.rebuild_index(progress=lambda f, m: bar.progress(min(max(f, 0.0), 1.0), m))
+            st.session_state.shared_msg = (f"Fien's corrections are in use (index {s4['version']}, "
+                                           f"{s4['newly_embedded']} fragments re-embedded, ${s4['cost_usd']:.3f}).")
+        except Exception as e:  # noqa: BLE001
+            st.session_state.shared_msg = f"⚠️ Could not load the corrections: {type(e).__name__}: {e}"
+        st.rerun()
+elif have:
+    st.caption("Up to date.")
+if msg := st.session_state.pop("shared_msg", None):
+    st.success(msg)
+
+with st.expander("⬆️ Publish my corrections (for Fien)"):
+    st.markdown(f"Publishes your chat corrections and your OpenRefine corrections to the public GitHub repo "
+                f"[{sharing.DATA_REPO}](https://github.com/{sharing.DATA_REPO}), so that other Navapps can use them. "
+                "Conversations and letters are never published. **Everything you publish is public.**")
+    if not sharing.token():
+        st.caption("Needs a GitHub key once: on github.com → Settings → Developer settings → Fine-grained tokens, "
+                   f"create a token for the repository {sharing.DATA_REPO} only, with *Contents: Read and write*.")
+        tok = st.text_input("GitHub key", type="password", key="gh_token")
+        if st.button("Save key") and tok.strip():
+            sharing.save_token(tok)
+            st.rerun()
+    else:
+        mine_notes = len(memory.load_notes(include_shared=False))
+        mine_letters = len({r["letter_key"] for r in corrections.load(include_shared=False)})
+        by = st.text_input("Published by", value=st.session_state.get("author", "") or "Fien")
+        confirm = st.checkbox(f"Publish {mine_notes} chat corrections and the checked persons of "
+                              f"{mine_letters:,} letters, publicly, replacing what was published before.")
+        c1, c2 = st.columns(2)
+        if c1.button("⬆️ Publish", type="primary", disabled=not confirm):
+            with st.spinner("Publishing …"):
+                try:
+                    m = sharing.publish(by.strip())
+                    st.cache_data.clear()
+                    st.success(f"Published on {m['published'][:16].replace('T', ' ')}. Other Navapps will see a notice.")
+                except Exception as e:  # noqa: BLE001
+                    st.error(f"Publishing failed: {type(e).__name__}: {e}")
+        if c2.button("Remove the GitHub key from this computer"):
+            sharing.TOKEN_FILE.unlink(missing_ok=True)
+            st.rerun()
 
 st.subheader("Metadata for counting questions")
 from rag import stats  # noqa: E402

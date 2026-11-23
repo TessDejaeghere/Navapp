@@ -45,11 +45,16 @@ def _terms(s: str) -> set[str]:
 
 
 # -- corrections ---------------------------------------------------------------------
-def load_notes(include_deleted: bool = False) -> list[dict]:
-    if not NOTES.exists():
-        return []
-    with NOTES.open(encoding="utf-8") as fh:
-        notes = [json.loads(line) for line in fh if line.strip()]
+def load_notes(include_deleted: bool = False, include_shared: bool = True) -> list[dict]:
+    """This installation's corrections, plus (read-only) the ones Fien published, unless already here."""
+    notes = []
+    if NOTES.exists():
+        with NOTES.open(encoding="utf-8") as fh:
+            notes = [json.loads(line) for line in fh if line.strip()]
+    if include_shared:
+        from .sharing import shared_notes
+        own = {n["id"] for n in notes}
+        notes += [n for n in shared_notes() if n["id"] not in own]
     return notes if include_deleted else [n for n in notes if not n.get("deleted")]
 
 
@@ -71,12 +76,12 @@ def add_note(fact: str, letter_ids: list[str] | None = None, persons: list[str] 
             "fact": fact, "letter_ids": [x.strip() for x in (letter_ids or []) if x and x.strip()],
             "persons": [x.strip() for x in (persons or []) if x and x.strip()],
             "question": question[:500], "conversation_id": conversation_id}
-    _write(load_notes(include_deleted=True) + [note])
+    _write(load_notes(include_deleted=True, include_shared=False) + [note])
     return note
 
 
 def update_note(note_id: str, **fields) -> None:
-    notes = load_notes(include_deleted=True)
+    notes = load_notes(include_deleted=True, include_shared=False)
     for n in notes:
         if n["id"] == note_id:
             n.update({k: v for k, v in fields.items() if k in ("fact", "letter_ids", "persons", "deleted")})

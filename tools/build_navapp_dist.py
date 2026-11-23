@@ -42,6 +42,7 @@ FILES = [
     "chatbot/rag/stats.py",
     "chatbot/rag/corrections.py",
     "chatbot/rag/memory.py",
+    "chatbot/rag/sharing.py",
     "data/nodegoat_export_2106.csv",                # letter metadata for counting questions
     "chatbot/rag/answer.py",
     "chatbot/rag/corpus.py",

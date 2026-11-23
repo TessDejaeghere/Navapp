@@ -109,11 +109,17 @@ def normalise(df: pd.DataFrame) -> tuple[list[dict], dict]:
     return out, summary
 
 
-def load() -> list[dict]:
-    if not STORE.exists():
-        return []
-    with STORE.open(encoding="utf-8") as fh:
-        return [json.loads(line) for line in fh if line.strip()]
+def load(include_shared: bool = True) -> list[dict]:
+    """Corrections imported here, plus Fien's published ones for letters not corrected here."""
+    rows = []
+    if STORE.exists():
+        with STORE.open(encoding="utf-8") as fh:
+            rows = [json.loads(line) for line in fh if line.strip()]
+    if include_shared:
+        from .sharing import shared_person_mentions
+        here = {r["letter_key"] for r in rows}
+        rows += [r for r in shared_person_mentions() if r["letter_key"] not in here]
+    return rows
 
 
 def imports() -> list[dict]:
@@ -123,7 +129,7 @@ def imports() -> list[dict]:
 def save(records: list[dict], summary: dict, file_name: str) -> dict:
     """Replace the corrections of the letters in this export; keep the other letters."""
     new_letters = {r["letter_key"] for r in records}
-    kept = [r for r in load() if r["letter_key"] not in new_letters]
+    kept = [r for r in load(include_shared=False) if r["letter_key"] not in new_letters]
     STORE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STORE.with_suffix(".tmp")
     with tmp.open("w", encoding="utf-8") as fh:

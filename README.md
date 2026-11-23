@@ -76,6 +76,14 @@ python -m venv .venv
 On Windows, `start_navapp.bat` does the last step. The reranker
 (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) is downloaded from Hugging Face on first use.
 
+## Sharing corrections
+
+Corrections are made by Fien, the project's authority on the collection, and stay on her computer until she
+publishes them from the *Chatbot data* page. They go to the public repo
+[TessDejaeghere/Navapp-corrections](https://github.com/TessDejaeghere/Navapp-corrections) (facts corrected in the
+chat, and the persons she checked in OpenRefine; never conversations or letters). Every other Navapp shows a
+notice when she published something new and loads it with one click.
+
 ## Updates
 
 Installed copies of Navapp check `navapp_version.json` in this repo at start-up (and then hourly). When a newer

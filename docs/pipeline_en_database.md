@@ -243,6 +243,28 @@ metadata, de automatische koppelingen en de transcripties, maar veranderen de te
 op nodegoat steunen. Op de pagina "Chatbot data" kan Fien ze bekijken, aanpassen, verwijderen of zelf
 toevoegen.
 
+### 2.5 Fiens correcties delen
+
+Fien is de bron van alle correcties. Alles wat zij verbetert, staat eerst alleen op haar computer. Op de
+pagina "Chatbot data" kan ze het, wanneer zij dat wil, publiceren naar de openbare GitHub-repo
+[TessDejaeghere/Navapp-corrections](https://github.com/TessDejaeghere/Navapp-corrections):
+
+| Bestand | Inhoud |
+|---|---|
+| `manifest.json` | wanneer, door wie, hoeveel |
+| `notes.jsonl` | de feiten die ze in de chat corrigeerde (zonder de gesprekken of haar vragen) |
+| `person_mentions.jsonl.gz` | de nagekeken personen uit haar OpenRefine-exports |
+
+Gesprekken en brieven worden nooit gepubliceerd. Het is bewust een aparte repo naast de code: Fiens
+GitHub-sleutel (een fine-grained token met alleen *Contents: Read and write* op die ene repo, bewaard in
+`config/github_token.txt`) kan zo alleen correcties schrijven, nooit de code die elke Navapp automatisch
+installeert.
+
+Andere Navapps controleren elk uur of er iets nieuws is gepubliceerd en tonen dan een melding. Met
+"Use these corrections" downloaden ze alles naar `chatbot/data/shared/` en herbouwen ze de index. Fiens
+correcties zijn daar alleen-lezen; eigen correcties blijven lokaal en gaan voor bij brieven die men zelf
+corrigeerde.
+
 ---
 
 ## 3. Hoe de chatbot de database gebruikt

@@ -1,4 +1,4 @@
 {
- "version": "2026.11.23",
- "notes": "First version with automatic updates."
+ "version": "2026.11.23.2",
+ "notes": "Fien can publish her corrections to GitHub, and every Navapp can load them with one click (Chatbot data page)."
 }
