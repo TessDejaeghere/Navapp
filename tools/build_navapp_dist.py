@@ -193,7 +193,22 @@ def main() -> None:
     args = ap.parse_args()
 
     if DIST.exists():
-        shutil.rmtree(DIST)
+        # Someone may be running Navapp from this folder: never wipe a folder that holds a user's own data,
+        # and never delete half of it. Renaming fails as a whole while files are open, so try that first.
+        own = [p for p in (DIST / "config", DIST / "chatbot" / "data" / "memory", DIST / "chatbot" / "data" / "shared")
+               if p.exists() and any(p.iterdir())]
+        own += [p for p in [DIST / "chatbot" / "data" / "corpus" / "uploads.jsonl"] if p.exists() and p.stat().st_size]
+        if own:
+            raise SystemExit("dist/navapp holds data of someone who used the app from it ("
+                             + ", ".join(str(p.relative_to(DIST)) for p in own)
+                             + "). Move those files elsewhere first, or run Navapp from another folder.")
+        old = DIST.with_name("navapp_old")
+        shutil.rmtree(old, ignore_errors=True)
+        try:
+            DIST.rename(old)
+        except OSError:
+            raise SystemExit("dist/navapp is in use (is Navapp running from it?). Close it and try again.")
+        shutil.rmtree(old, ignore_errors=True)
     DIST.mkdir(parents=True)
 
     missing = []
