@@ -93,24 +93,31 @@ def reading_lines(provenance: list[dict]) -> list[str]:
     return out
 
 
+TRANSCRIPTION = {"manual": "manual transcription", "corrected_htr": "corrected HTR", "opus_htr": "uncorrected HTR"}
+
+
 def source_markdown(r: dict) -> str:
-    lines = [f"**{r['sender'] or 'unknown'}** to **{r['recipient'] or 'unknown'}** · {r['date'] or 'undated'}  ",
-             f"*{r['letter_id']} · transcription: {SOURCE_LABEL.get(r['text_source'], r['text_source'])} · "
-             f"relevance {r.get('confidence', 0):.0%}*", "", r["text"].replace("\n", "  \n"), ""]
+    """One cited source; every block is its own paragraph (single newlines would run them together)."""
+    blocks = [f"**{r['sender'] or 'unknown'}** to **{r['recipient'] or 'unknown'}** · {r['date'] or 'undated'}  \n"
+              f"*{r['letter_id']} · transcription: {TRANSCRIPTION.get(r['text_source'], r['text_source'])} · "
+              f"relevance {r.get('confidence', 0):.0%}*", r["text"].replace("\n", "  \n")]
     if r.get("persons_checked"):
-        lines.append("**Persons (checked by the research team):** " + ", ".join(r["persons_checked"]))
+        blocks.append("**Persons (checked by the research team):** " + ", ".join(r["persons_checked"]))
     if r["persons_linked"]:
-        lines.append("**Linked persons (automatic suggestion):** " + ", ".join(r["persons_linked"]))
+        blocks.append("**Linked persons (automatic suggestion):** " + ", ".join(r["persons_linked"]))
     if r.get("doubts"):
-        lines.append("**❓ The historian notes:** " + " · ".join(r["doubts"]))
-    lines += reading_lines(r.get("provenance") or [])
-    for label, f in (("Places", "places"), ("Institutions", "organisations"), ("Artworks", "artworks"),
-                     ("Events", "events")):
-        if r[f]:
-            lines.append(f"**{label}:** " + ", ".join(r[f]))
+        blocks.append("**❓ The historian notes:** " + " · ".join(r["doubts"]))
+    readings = reading_lines(r.get("provenance") or [])
+    if readings:
+        blocks.append("\n".join(readings))   # heading line followed by its bullet list
+    others = [f"**{label}:** " + ", ".join(r[f]) for label, f in
+              (("Places", "places"), ("Institutions", "organisations"), ("Artworks", "artworks"), ("Events", "events"))
+              if r[f]]
+    if others:
+        blocks.append("  \n".join(others))
     if r["permalink"]:
-        lines.append(f"\n[📜 Open the letter in the KBR catalogue]({r['permalink']})")
-    return "\n".join(lines)
+        blocks.append(f"[📜 Open the letter in the KBR catalogue]({r['permalink']})")
+    return "\n\n".join(blocks)
 
 
 def show_sources(sources: list[dict]) -> None:
