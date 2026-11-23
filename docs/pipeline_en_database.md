@@ -1,23 +1,26 @@
 # Navapp: pipeline en chatbotdatabase
 
-Stand van zaken op 21 november 2026 (chatbotindex v006).
+Stand van zaken op 23 november 2026 (chatbotindex v007, met Fiens correcties van Batch 1).
 
 Navapp is één Streamlit-app (`navapp.py`) met drie pagina's:
 
 | Pagina | Bestand | Voor wie, waarvoor |
 |---|---|---|
 | Pipeline | `pipeline_app.py` | Fien: van scan tot transcriptie, entiteiten, clusters, koppelingen en doorsturen naar de chatbot |
-| Chatbot | `navapp_pages/chat.py` | vragen stellen over de brieven (inhoud én tellingen) |
-| Chatbot data | `navapp_pages/chat_data.py` | toegevoegde brieven bekijken of verwijderen, een nieuwe nodegoat-export laden, de index herbouwen |
+| Chatbot | `navapp_pages/chat.py` | vragen stellen over de brieven (inhoud én tellingen); gesprekken worden bewaard |
+| Chatbot data | `navapp_pages/chat_data.py` | toegevoegde brieven, OpenRefine-correcties, wat de bot onthoudt, nodegoat-export, index herbouwen |
 
 ```
-scans ──► 1 invoer ──► 2 HTR ──► 3 NER ► clustering ► (LLM-check) ► linking ──► mention-CSV (review)
-                                         │
-                                         └──► 4 naar de chatbot ──► uploads.jsonl ──► nieuwe indexversie
-                                                                                      │
-nodegoat-export (metadata) ─────────────────────────────────────────────────────────►┤
-onderzoekscorpus (letters.jsonl) ────────────────────────────────────────────────────►┘
-                                                                         chatbot: zoeken + tellen + antwoorden
+scans ──► 1 invoer ──► 2 HTR ──► 3 NER ► clustering ► (LLM-check) ► linking ──► mention-CSV
+                                         │                                          │
+                                         │                                OpenRefine (Fien verbetert)
+                                         │                                          │
+                                         └──► 4 naar de chatbot ──► uploads.jsonl   ▼
+                                                                         correcties (person_mentions.jsonl)
+onderzoekscorpus (letters.jsonl) ────────────────────────────────────────►┐
+nodegoat-export (metadata) ──────────────────────────────────────────────►├──► indexversie vNNN
+                                                                          ┘
+                     chatbot: zoeken + tellen + antwoorden  ◄──►  geheugen (correcties uit gesprekken)
 ```
 
 ---
@@ -64,7 +67,7 @@ eventueel afzender, ontvanger en jaar. De app waarschuwt als een brief al eerder
    - een gendercontrole en een fonetische ondergrens (92) houden foute koppelingen tegen;
    - onder de drempel wordt de cluster "NIL" (geen koppeling).
 5. **Uitvoer:** een mention-CSV (`mentions.csv`) om na te kijken, met de voorgestelde cluster, persoon,
-   score en alternatieve kandidaten.
+   score en alternatieve kandidaten. Fien verbetert die in OpenRefine (zie 2.3).
 
 ### Stap 4: naar de chatbot
 - **Wat er meegaat:** de verwerkte brieven met hun tekst, metadata, gekoppelde personen en alle andere
@@ -84,7 +87,8 @@ eventueel afzender, ontvanger en jaar. De app waarschuwt als een brief al eerder
 
 De index staat in `chatbot/data/index/vNNN/`. Het bestand `CURRENT` wijst naar de actieve versie, en de
 twee recentste versies worden bewaard. Een versie bestaat uit `chunks.db` (SQLite), `embeddings.npy` en
-`embeddings_meta.json`.
+`embeddings_meta.json`. Bij elke bouw worden achtereenvolgens het onderzoekscorpus, de doorgestuurde
+brieven en Fiens OpenRefine-correcties samengevoegd.
 
 ### 2.1 Brieftekst: fragmenten (tabel `chunks`)
 
@@ -111,34 +115,35 @@ leesfouten in namen wel over (zie het evaluatieverslag).
 | Groep | Veld | Inhoud |
 |---|---|---|
 | Identificatie | `id`, `letter_id`, `chunk` | bv. "Ms. II 70/1/181#0" |
-| Metadata | `sender`, `recipient` | naam met levensdata, zoals in nodegoat |
+| | `start` | positie van het fragment in de brief, zodat correcties per vermelding exact geplaatst worden |
+| Metadata | `sender`, `recipient` | naam met levensdata; voor gecorrigeerde brieven Fiens `Source_v2` en `Target_v2` |
 | | `date`, `year` | datum en jaar van de brief |
 | | `archive` | bewaarplaats |
 | | `permalink` | link naar de KBR-catalogus |
 | | `text_source` | welke transcriptie (zie hierboven) |
 | Tekst | `text` | het brieffragment |
-| Entiteiten | `persons_linked` | personen uit de personenlijst, via de linking. *Automatische suggestie* |
+| Personen | `persons_checked` | personen **nagekeken door het onderzoeksteam** (uit de OpenRefine-export) |
+| | `persons_linked` | automatisch gekoppelde personen, alleen voor brieven die nog niet nagekeken zijn |
 | | `persons_mentioned` | de namen zoals ze in de tekst staan |
-| | `places`, `organisations`, `artworks`, `events` | de overige NER-entiteiten van dat fragment |
+| Overige entiteiten | `places`, `organisations`, `artworks`, `events` | de overige NER-entiteiten van dat fragment |
 
 **Wat er geëmbed wordt.** Vóór het embedden komt er een kopregel voor de tekst: *Letter from X to Y |
 date … | persons: … | places: … | artworks: …*. Zo vindt de zoekmachine een fragment ook via de metadata
 en entiteiten, niet alleen via de tekst zelf.
 
-**Dekking van de entiteiten:**
+**Dekking van de personen:**
 
-| Veld | Fragmenten |
-|---|---|
-| Gekoppelde personen | 3.045 |
-| Plaatsen | 3.007 |
-| Kunstwerken | 2.267 |
+| | Fragmenten | Brieven |
+|---|---|---|
+| Met nagekeken personen | 2.621 | 1.564 |
+| Nog met automatische koppelingen | 365 | |
 
 **Zoekindexen:**
 - `chunks_fts`: een SQLite FTS5-trigramindex op tekst plus kopregel, zonder accenten. Hij dient voor
   zoeken op trefwoorden (BM25), en vangt ook spellingvarianten en HTR-ruis gedeeltelijk op.
 - `embeddings.npy`: 3.494 vectoren van `openai/text-embedding-3-large` (3.072 dimensies), opgehaald via
   OpenRouter. Een embeddingcache (`embed_cache.sqlite`) zorgt dat ongewijzigde fragmenten nooit opnieuw
-  betaald worden.
+  betaald worden. Het verwerken van Batch 1 kostte $0,19 (3.110 fragmenten opnieuw geëmbed).
 
 ### 2.2 Metadata voor tellingen
 
@@ -149,8 +154,8 @@ Deze tabellen komen uit Fiens nodegoat-export (`data/nodegoat_export_2106.csv`, 
 |---|---|---|
 | `letters` | 2.372 | één rij per brief, met afzender en ontvanger (naam + nodegoat-ID), datum, jaar, archief, IDN, of er tekst is en welke |
 | `persons` | 1.067 | personenlijst: nodegoat-ID, naam, naam zonder levensdata, geboorte en overlijden (330 personen hebben levensdata) |
-| `letter_persons` | 6.178 | welke gekoppelde personen in welke brief vermeld worden (1.870 brieven, 590 verschillende personen) |
-| `letter_entities` | 20.450 | plaatsen, instellingen, kunstwerken en gebeurtenissen per brief (zie hieronder) |
+| `letter_persons` | 6.338 | welke personen in welke brief vermeld worden (1.826 brieven, 727 personen); nagekeken waar gecorrigeerd, anders automatisch |
+| `letter_entities` | 18.626 | plaatsen, instellingen, kunstwerken en gebeurtenissen per brief (zie hieronder) |
 
 **Brieven (`letters`):**
 
@@ -179,14 +184,64 @@ Deze tabellen komen uit Fiens nodegoat-export (`data/nodegoat_export_2106.csv`, 
 
 | Soort | Vermeldingen | Brieven |
 |---|---|---|
-| Plaatsen | 7.748 | 1.821 |
-| Kunstwerken | 7.078 | 1.443 |
-| Instellingen | 3.965 | 1.257 |
-| Gebeurtenissen | 1.659 | 821 |
+| Plaatsen | 7.349 | 1.812 |
+| Kunstwerken | 6.381 | 1.431 |
+| Instellingen | 3.394 | 1.238 |
+| Gebeurtenissen | 1.502 | 806 |
+
+Deze aantallen liggen lager dan in de vorige versie van dit rapport: losse woordjes zoals "du" of "-Ar" die
+de NER als entiteit aanzag, worden nu weggefilterd.
 
 **Twee soorten tellingen.** Wie wie schreef, wanneer en vanuit welk archief: dat telt de bot exact,
-op nodegoat-ID. Wie of wat er in een brief vermeld wordt: dat komt uit de automatische NER en linking.
-De bot noemt zulke getallen dus een *schatting*.
+op nodegoat-ID. Wie of wat er in een brief vermeld wordt: dat komt uit Fiens correcties waar die er zijn,
+en anders uit de automatische NER en linking. De bot noemt zulke getallen dus een *schatting*.
+
+### 2.3 Fiens correcties uit OpenRefine
+
+Fien verbetert de mention-CSV van de pipeline in OpenRefine en laadt de export op de pagina "Chatbot data".
+De app zet die om naar `chatbot/data/corrections/person_mentions.jsonl`; bij elke indexbouw vervangen haar
+personen de automatische koppelingen van de brieven in die export.
+
+| Wat Fien invulde | Wat de chatbot ermee doet | Batch 1 |
+|---|---|---|
+| Nodegoat-naam in `surface_v2`, `ID_Nodegoat`, of een nodegoat-ID in `Notes` | gekoppeld aan die persoon | 7.358 vermeldingen, 346 personen |
+| Een andere naam in `surface_v2` (bv. "mon frère" → "Aurèle Robert") | als naam bewaard, zonder nodegoat-ID | 901 |
+| `DEL` / "Geen PER" | verwijderd | 164 |
+| `GRP` / `ALG` | blijft staan, zonder persoon | 197 / 161 |
+| `ART` / `LOC` | verplaatst naar kunstwerken of plaatsen | 64 / 22 |
+| Niets gewijzigd | naam blijft als vermelding, zonder persoon | 12.404 |
+| `Source_v2` / `Target_v2` | afzender en ontvanger van de brief in de fragmenten | |
+
+Batch 1 (`20262808_KBR_Batch1_PER-and-PER-NOM`) beslaat 1.694 brieven; 21.257 van de 21.258 vermeldingen
+vallen exact op hun plek in de tekst. Een nieuwere export van dezelfde brieven vervangt de oude; brieven uit
+andere batches blijven staan.
+
+Wat dit oploste, onder meer:
+
+| Persoon | Was | Nu |
+|---|---|---|
+| François Marius Granet | foutief gekoppeld aan Antoinnette Granet | 132 brieven |
+| B. Renard | onterecht gekoppeld aan veel losse "Mr"-vermeldingen | 12 brieven |
+| "Madame Navez" | gekoppeld aan François-Joseph Navez | Augustine Flore de Lathuy (182 brieven) |
+| "Robert" in de brief over Sturms dood | Louis-Léopold Robert (overleden 1835) | Alexandre Robert |
+
+Vermeldingen die Fien ongewijzigd liet, verliezen hun automatische koppeling. Dat waren er 1.924, vooral
+fouten ("L", "Mr" → B. Renard, "de"), maar ook enkele plausibele (Dupré → Louis Dupré).
+
+### 2.4 Geheugen: correcties uit gesprekken en bewaarde gesprekken
+
+| Bestand | Inhoud |
+|---|---|
+| `chatbot/data/memory/notes.jsonl` | feiten die een onderzoeker in de chat corrigeerde, met brief-ID's, personen, auteur en datum |
+| `chatbot/data/memory/conversations.sqlite` | alle gesprekken van de chatpagina, te heropenen via de zijbalk |
+
+Corrigeert Fien de bot op een feit ("Ms. II 70/1/184 is van Alexandre Robert, niet van Portaels"), dan slaat
+de bot dat op met het hulpmiddel `remember_correction` en bevestigt hij het onder zijn antwoord. In latere
+gesprekken krijgt hij de correcties die bij de vraag horen (zolang er minder dan 30 zijn: alle), en een
+correctie over een brief staat ook naast die brief wanneer hij hem leest. Zulke correcties gaan voor op de
+metadata, de automatische koppelingen en de transcripties, maar veranderen de tellingen niet: die blijven
+op nodegoat steunen. Op de pagina "Chatbot data" kan Fien ze bekijken, aanpassen, verwijderen of zelf
+toevoegen.
 
 ---
 
@@ -197,9 +252,10 @@ De bot noemt zulke getallen dus een *schatting*.
    - De bot zoekt hybride: trefwoorden (BM25) en embeddings, samengevoegd met reciprocal rank fusion.
    - Daarna sorteert een lokale reranker de resultaten opnieuw (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`).
    - Er komen maximaal 3 fragmenten per brief mee, en de bot mag maximaal 2 keer zoeken per vraag.
+   - Met `letter_id` leest hij één bepaalde brief in plaats van te zoeken.
    - Filters: correspondent, periode, vermelde persoon en ongedateerde brieven aan of uit.
    - Elk antwoord verwijst met [#n] naar de fragmenten; de app toont die met een link naar de KBR.
-3. **Telvragen:** daarvoor zijn er aparte tools.
+3. **Telvragen:** daarvoor zijn er aparte tools. Alle teltools kunnen ook op één brief-ID filteren.
 
    | Tool | Wat het doet |
    |---|---|
@@ -212,23 +268,36 @@ De bot noemt zulke getallen dus een *schatting*.
    | `collection_overview` | geeft een overzicht van de collectie |
 
    De gegevens achter elk getal verschijnen als tabel of grafiek onder het antwoord.
-4. **Kostprijs en snelheid:** ongeveer $0,05 en 16 seconden per vraag (evaluatie van 21/11/2026).
+4. **Geheugen:** `remember_correction` slaat een gecorrigeerd feit op (zie 2.4).
+5. **Taal:** de bot antwoordt in de taal van de vraag (Nederlands, Engels of Frans).
+6. **Kostprijs en snelheid:** ongeveer $0,05 en 16 seconden per vraag (evaluatie van 21/11/2026). Tijdens het
+   wachten toont de app wisselende boodschapjes ("Sifting through veuves Poignet", "Looking for castles in
+   Spain" …).
 
 ## 4. Bekende beperkingen van de data
 
-**Fouten in de koppelingen.** Die komen in `persons_linked` terecht. Voorbeelden:
-- "Robert" wordt soms Louis-Léopold waar Alexandre bedoeld is;
-- "Léonard" wordt du Bus de Gisignies;
-- "Madame Navez" wordt François-Joseph Navez.
+**Automatische koppelingen in nog niet nagekeken brieven.** Voor de brieven buiten Batch 1 staan nog
+automatische suggesties in `persons_linked`, met de bekende soorten fouten ("Léonard" → du Bus de Gisignies).
 
-**Scheve ranglijsten van vermelde personen**, door losse "Mr"-vermeldingen gekoppeld aan B. Renard en door
-koppelfouten naar Antoinnette Granet.
+**Een metadatafout:** Ms. II 70/1/184 staat in nodegoat op naam van Portaels, maar is van Robert. Dat is
+in nodegoat te verbeteren; in de chat kan de bot het intussen onthouden als correctie.
 
-**Een metadatafout:** Ms. II 70/1/184 staat in nodegoat op naam van Portaels, maar is van Robert.
+**Personen zonder nodegoat-ID.** Namen die Fien wel identificeerde maar die niet in de personenlijst staan,
+tellen als aparte "persoon" op naam. `find_person` vindt ze niet, dus vragen naar zo iemand lopen via de tekst.
 
-**Oudere clusterregel in het corpus.** Het onderzoekscorpus gebruikt nog de oudere dedupe-clusters (`dd::`),
-niet de regel uit de app. Nieuw doorgestuurde brieven volgen de app-regel.
+**Relaties tussen personen.** "De vrouw van Navez" vindt de bot niet: hij zoekt personen op naam en gebruikt
+de kolommen "Spouse of" en "Family of" uit de personenlijst nog niet.
 
 **HTR-leesfouten.** Ongecorrigeerde HTR (1.467 brieven) bevat leesfouten, vooral in eigennamen.
 
 **Brieven zonder tekst.** 385 brieven tellen mee in de statistieken, maar hun inhoud is niet doorzoekbaar.
+
+## 5. Navapp bijwerken
+
+- **Code:** ontwikkeling gebeurt in de Navez-onderzoeksrepo. `tools/export_navapp_repo.py` kopieert de code
+  naar de private repo [TessDejaeghere/Navapp](https://github.com/TessDejaeghere/Navapp) (alleen code, geen
+  data of sleutels).
+- **Desktoppakket voor Fien:** `tools/build_navapp_dist.py --zip` maakt `dist/navapp.zip` (± 530 MB, met
+  model, index en correcties, zonder OpenRouter-sleutel).
+- **Fiens eigen gegevens:** alles wat Fien in de app doet, staat in `chatbot/data` van haar installatie
+  (doorgestuurde brieven, correcties, gesprekken, geheugen). Bij een update moet die map blijven staan.
