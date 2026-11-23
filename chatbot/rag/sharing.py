@@ -34,7 +34,7 @@ BRANCH = "main"
 RAW = f"https://raw.githubusercontent.com/{DATA_REPO}/{BRANCH}/"
 API = f"https://api.github.com/repos/{DATA_REPO}/contents/"
 FILES = ("notes.jsonl", "person_mentions.jsonl.gz", "manifest.json")   # manifest last: it marks completion
-NOTE_FIELDS = ("id", "created", "updated", "author", "fact", "letter_ids", "persons")
+NOTE_FIELDS = ("id", "created", "updated", "author", "fact", "letter_ids", "persons", "history")
 
 
 def _open(req: urllib.request.Request, timeout: int = 60) -> bytes:

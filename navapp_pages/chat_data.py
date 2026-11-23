@@ -85,6 +85,43 @@ if done and st.button("Remove all corrections (back to the automatic links)"):
         indexer.rebuild_index()
     st.rerun()
 
+st.subheader("History of the readings")
+st.caption("Every checked mention keeps its history: what the machine suggested, and every reading by the historian "
+           "that differed from the one before (when, and from which export). Her doubts are kept with them.")
+rows = []
+for r in corrections.load():
+    hist = r.get("history") or []
+    first = next((h for h in hist if h["by"] == "machine"), {})
+    last = hist[-1] if hist else {}
+    rows.append({"letter": r["letter_id"], "mention": r["surface"],
+                 "machine": first.get("person") or "—", "historian": r.get("person") or r["status"],
+                 "changed": (first.get("person") or "") != (r.get("person") or ""), "doubt": r.get("note", ""),
+                 "readings": len(hist), "since": (last.get("when") or "")[:10], "source": last.get("source", "")})
+if rows:
+    hist_df = pd.DataFrame(rows)
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Checked mentions", f"{len(hist_df):,}")
+    c2.metric("Reading changed by the historian", f"{int(hist_df['changed'].sum()):,}")
+    c3.metric("With a doubt or remark", f"{int((hist_df['doubt'] != '').sum()):,}")
+    view = st.radio("Show", ["Most frequent changes", "Doubts and remarks", "Search"], horizontal=True)
+    if view == "Most frequent changes":
+        top = (hist_df[hist_df["changed"]].groupby(["machine", "historian"]).size()
+               .reset_index(name="mentions").sort_values("mentions", ascending=False).head(25))
+        st.dataframe(top, hide_index=True, width="stretch")
+    elif view == "Doubts and remarks":
+        st.dataframe(hist_df[hist_df["doubt"] != ""][["letter", "mention", "historian", "doubt"]],
+                     hide_index=True, width="stretch")
+    else:
+        q = st.text_input("Name, mention or letter", placeholder="e.g. Robert, Granet, Ms. II 70/1/181")
+        if q:
+            hit = hist_df[hist_df[["letter", "mention", "machine", "historian"]].apply(
+                lambda col: col.str.contains(q, case=False, regex=False)).any(axis=1)]
+            st.dataframe(hit, hide_index=True, width="stretch")
+    st.download_button("⬇️ Download all readings (CSV)", hist_df.to_csv(index=False).encode("utf-8-sig"),
+                       file_name="navapp_readings.csv", mime="text/csv")
+else:
+    st.info("No checked mentions yet: upload an OpenRefine export above.")
+
 st.subheader("What the chatbot remembers")
 from rag import memory  # noqa: E402
 
@@ -101,6 +138,8 @@ for n in sorted(notes, key=lambda x: x["created"], reverse=True):
             st.markdown(n["fact"])
             if n["letter_ids"]:
                 st.caption("Letters: " + ", ".join(n["letter_ids"]))
+            for h in n.get("history") or []:
+                st.caption(f"Earlier ({h['when'][:10]}): ~~{h['fact']}~~")
             st.caption(f"Published by {n.get('published_by') or n['author']}: read-only here.")
         continue
     with st.expander(f"{n['created'][:10]} · {n['author']} · {n['fact'][:90]}"):
@@ -108,6 +147,8 @@ for n in sorted(notes, key=lambda x: x["created"], reverse=True):
         letters = st.text_input("Letters (comma-separated)", ", ".join(n["letter_ids"]), key=f"let_{n['id']}")
         if n.get("question"):
             st.caption(f"Saved while answering: *{n['question']}*")
+        for h in n.get("history") or []:
+            st.caption(f"Earlier version ({h['when'][:10]}): ~~{h['fact']}~~")
         b1, b2 = st.columns(2)
         if b1.button("💾 Save", key=f"save_{n['id']}"):
             memory.update_note(n["id"], fact=" ".join(fact.split()),

@@ -38,6 +38,14 @@ GROUP = re.compile(r"\bGRP\b", re.I)
 GENERIC = re.compile(r"\bALG\b", re.I)
 AS_ARTWORK = re.compile(r"^\s*ART\s*$", re.I)
 AS_PLACE = re.compile(r"^\s*LOC\s*$", re.I)
+STATUS_CODES = re.compile(r"\b(DEL|GRP|ALG|ART|LOC|ST)\b", re.I)
+
+
+def doubt_note(notes: str) -> str:
+    """The historian's own words in Notes (doubts, hints), without status codes and nodegoat IDs."""
+    rest = STATUS_CODES.sub("", NG_ID.sub("", notes or ""))
+    rest = re.sub(r"^[\s/,;:-]+|[\s/,;:-]+$", "", rest)
+    return rest if len(re.sub(r"\W", "", rest)) >= 3 else ""
 
 
 def _glossary() -> tuple[dict, dict, dict]:
@@ -97,13 +105,16 @@ def normalise(df: pd.DataFrame) -> tuple[list[dict], dict]:
                                                      if len(strip_dates(v2).split()) >= 2 else "")
             status = "linked" if pid in name_of else ("named" if _looks_like_identification(v1, v2) else "open")
         person = name_of.get(pid, "") if status == "linked" else (v2 if status == "named" else "")
+        mid = col(r, "suggested_person_id")
+        machine = (name_of.get(mid) or col(r, "suggested_person_name")) if mid.startswith("ng") else ""
         tally[status] += 1
         out.append({"letter_key": letter_key(col(r, "letter_id")), "letter_id": col(r, "letter_id"),
                     "start": int(float(col(r, "span_start") or -1)), "end": int(float(col(r, "span_end") or -1)),
                     "label": label, "surface": col(r, "Surface_OG") or v1, "status": status,
                     "person": person, "person_id": pid if status == "linked" else "", "value": v2,
                     "sender": col(r, "Source_v2"), "recipient": col(r, "Target_v2"),
-                    "context_before": col(r, "context_before")[-80:]})
+                    "context_before": col(r, "context_before")[-80:],
+                    "note": doubt_note(notes), "machine_person": machine})
     summary = {"mentions": len(out), "letters": len({o["letter_key"] for o in out}),
                "persons": len({o["person_id"] for o in out if o["person_id"]}), **dict(tally)}
     return out, summary
@@ -126,9 +137,44 @@ def imports() -> list[dict]:
     return json.loads(LOG.read_text(encoding="utf-8")) if LOG.exists() else []
 
 
-def save(records: list[dict], summary: dict, file_name: str) -> dict:
-    """Replace the corrections of the letters in this export; keep the other letters."""
+def _mention(r: dict) -> tuple:
+    return r["letter_key"], r["start"], r["end"]
+
+
+def _reading(r: dict) -> tuple:
+    return r.get("status"), r.get("person"), r.get("note", "")
+
+
+def with_history(records: list[dict], previous: list[dict], when: str, source: str, by: str) -> list[dict]:
+    """Give every mention its history of readings: the machine's suggestion first, then every reading by the
+    historian that differs from the one before. A re-import of an unchanged reading adds nothing."""
+    prev = {_mention(p): p for p in previous}
+    for r in records:
+        entry = {"when": when, "by": by, "source": source, "status": r["status"], "person": r["person"],
+                 "note": r.get("note", "")}
+        old = prev.get(_mention(r))
+        if old and old.get("history"):
+            hist = list(old["history"])
+            if _reading(old) != _reading(r):
+                hist.append(entry)
+            else:   # same reading: keep when and where it was first made
+                r.update({k: old[k] for k in ("imported", "source") if k in old})
+        else:
+            hist = [{"when": "", "by": "machine", "source": "pipeline (automatic linking)",
+                     "status": "linked" if r.get("machine_person") else "open", "person": r.get("machine_person", ""),
+                     "note": ""}, entry]
+        r["history"] = hist
+        r.setdefault("imported", when)
+        r.setdefault("source", source)
+    return records
+
+
+def save(records: list[dict], summary: dict, file_name: str, by: str = "historian") -> dict:
+    """Replace the corrections of the letters in this export; keep the other letters and every earlier reading."""
     new_letters = {r["letter_key"] for r in records}
+    previous = load(include_shared=False)
+    previous += [r for r in load() if r["letter_key"] not in {p["letter_key"] for p in previous}]  # published ones
+    records = with_history(records, previous, datetime.now().isoformat(timespec="seconds"), file_name, by)
     kept = [r for r in load(include_shared=False) if r["letter_key"] not in new_letters]
     STORE.parent.mkdir(parents=True, exist_ok=True)
     tmp = STORE.with_suffix(".tmp")
@@ -193,6 +239,7 @@ def apply(chunks: list[dict], corrections: list[dict] | None = None) -> dict:
         sender, recipient = _mode([m["sender"] for m in ms]), _mode([m["recipient"] for m in ms])
         for c in cs:
             c["persons_linked"], c["persons_mentioned"], c["persons_checked"] = [], [], []
+            c["doubts"], c["provenance"] = [], []
             c["sender"], c["recipient"] = sender or c["sender"], recipient or c["recipient"]
         placed = set()
         for i, m in enumerate(ms):
@@ -201,6 +248,14 @@ def apply(chunks: list[dict], corrections: list[dict] | None = None) -> dict:
                 if not _in_chunk(m, c, hits):
                     continue
                 placed.add(i)
+                c["provenance"].append({
+                    "surface": _ws(m["surface"]), "label": m["label"], "status": m["status"], "person": m["person"],
+                    "machine": m.get("machine_person", ""), "note": m.get("note", ""),
+                    "checked": (m.get("imported") or "")[:10], "source": m.get("source", ""),
+                    "history": m.get("history", [])})
+                if m.get("note"):
+                    who = f"{_ws(m['surface'])} → {m['person']}" if m["person"] else _ws(m["surface"])
+                    c["doubts"].append(f"{who}: {m['note']}")
                 if m["status"] in ("linked", "named") and m["person"] not in c["persons_checked"]:
                     c["persons_checked"].append(m["person"])
                 if m["label"] == "PER" and m["status"] not in ("deleted", "artwork", "place"):

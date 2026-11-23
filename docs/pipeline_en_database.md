@@ -265,6 +265,41 @@ Andere Navapps controleren elk uur of er iets nieuws is gepubliceerd en tonen da
 correcties zijn daar alleen-lezen; eigen correcties blijven lokaal en gaan voor bij brieven die men zelf
 corrigeerde.
 
+### 2.6 Herkomst, geschiedenis en twijfel
+
+Navapp bewaart niet alleen de huidige identificatie van een persoon, maar ook hoe die tot stand kwam. Elke
+nagekeken vermelding draagt:
+
+| Veld | Inhoud |
+|---|---|
+| `machine_person` | wat de automatische linking voorstelde |
+| `history` | alle lezingen na elkaar: eerst de machine, dan elke lezing van de historicus die verschilt van de vorige, met datum, bron (welke export) en status |
+| `note` | haar eigen woorden uit de kolom `Notes` (twijfel, hints), zonder statuscodes of nodegoat-ID's |
+
+Een nieuwe export met een gewijzigde lezing voegt een stap toe aan de geschiedenis; een ongewijzigde lezing voegt
+niets toe. Ook correcties in de chat houden hun eerdere formuleringen bij. Die geschiedenis reist mee in Fiens
+publicaties.
+
+In de chatbotindex krijgt elk fragment twee extra velden: `provenance` (per vermelding: oppervlaktevorm, lezing
+van de machine, lezing van de historicus, datum, bron, geschiedenis) en `doubts` (haar twijfels). De bot:
+- vermeldt haar twijfel wanneer hij over zo'n persoon spreekt ("de historicus noteert: niet zeker welke zoon");
+- kan met `identification_history` uitleggen hoe een persoon in een brief geïdentificeerd werd en of dat veranderde.
+
+De app toont bij elke bron hoe de personen gelezen werden (machine → historicus, met datum), en de pagina
+"Chatbot data" geeft een overzicht van alle lezingen: de vaakst gewijzigde identificaties, alle twijfels, zoeken
+op naam of brief, en een CSV met alles.
+
+Voor Batch 1: 21.271 nagekeken vermeldingen, waarvan 5.462 met een andere lezing dan de machine voorstelde, en
+210 met een twijfel of opmerking. De vaakste wijzigingen:
+
+| Machine | Historicus | Vermeldingen |
+|---|---|---|
+| (geen persoon) | François-Joseph Navez | 296 |
+| David d'Angers | Jacques-Louis David | 174 |
+| François-Joseph Navez | Augustine Flore de Lathuy | 113 |
+| Antoinnette Granet | François Marius Granet | 106 |
+| (geen persoon) | Pierre III Poisson | 104 |
+
 ---
 
 ## 3. Hoe de chatbot de database gebruikt

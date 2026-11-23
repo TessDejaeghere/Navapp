@@ -62,6 +62,37 @@ def get_searcher(version: str) -> Searcher:
     return Searcher()
 
 
+STATUS_WORDS = {"linked": "", "named": "", "open": "no person", "deleted": "not a person", "group": "a group",
+                "generic": "generic, no one in particular", "artwork": "an artwork", "place": "a place"}
+
+
+def reading(step: dict) -> str:
+    """One reading of a mention: the person, or what the mention turned out to be."""
+    return step.get("person") or STATUS_WORDS.get(step.get("status"), step.get("status", "")) or "no person"
+
+
+def reading_lines(provenance: list[dict]) -> list[str]:
+    """Who identified whom in this fragment: only the mentions whose reading changed, or that carry a doubt."""
+    changed = [p for p in provenance
+               if len({reading(h) for h in p.get("history", [])}) > 1 or p.get("note")]
+    if not provenance:
+        return []
+    when = max((p.get("checked") or "" for p in provenance), default="")
+    out = [f"**How the persons were read:** {len(provenance)} mention(s) checked by the historian"
+           + (f" ({when})" if when else "") + (", unchanged from the machine's suggestion." if not changed else ":")]
+    groups: dict[tuple, list[dict]] = {}   # the same mention read the same way, several times in the fragment
+    for p in changed:
+        key = (p["surface"].lower(), tuple(reading(h) for h in p.get("history", [])), p.get("note", ""))
+        groups.setdefault(key, []).append(p)
+    for (_, _, note), ps in list(groups.items())[:8]:
+        p = ps[0]
+        steps = " → ".join(f"{reading(h)} *({'machine' if h['by'] == 'machine' else h['by'] + ', ' + h['when'][:10]})*"
+                           for h in p.get("history", []))
+        times = f" (×{len(ps)})" if len(ps) > 1 else ""
+        out.append(f"- *{p['surface']}*{times}: {steps}" + (f" ❓ {note}" if note else ""))
+    return out
+
+
 def source_markdown(r: dict) -> str:
     lines = [f"**{r['sender'] or 'unknown'}** to **{r['recipient'] or 'unknown'}** · {r['date'] or 'undated'}  ",
              f"*{r['letter_id']} · transcription: {SOURCE_LABEL.get(r['text_source'], r['text_source'])} · "
@@ -70,6 +101,9 @@ def source_markdown(r: dict) -> str:
         lines.append("**Persons (checked by the research team):** " + ", ".join(r["persons_checked"]))
     if r["persons_linked"]:
         lines.append("**Linked persons (automatic suggestion):** " + ", ".join(r["persons_linked"]))
+    if r.get("doubts"):
+        lines.append("**❓ The historian notes:** " + " · ".join(r["doubts"]))
+    lines += reading_lines(r.get("provenance") or [])
     for label, f in (("Places", "places"), ("Institutions", "organisations"), ("Artworks", "artworks"),
                      ("Events", "events")):
         if r[f]:

@@ -11,7 +11,7 @@ import re
 CHUNK_CHARS = 1600      # letters are short: most fit in one chunk
 OVERLAP_CHARS = 250
 OTHER_LABELS = {"LOC": "places", "ORG": "organisations", "ART": "artworks", "EVT": "events"}
-LIST_FIELDS = ["persons_linked", "persons_checked", "persons_mentioned", "places", "organisations", "artworks", "events"]
+LIST_FIELDS = ["persons_linked", "persons_checked", "persons_mentioned", "doubts", "provenance", "places", "organisations", "artworks", "events"]
 
 
 def year_of(date: str) -> int | None:

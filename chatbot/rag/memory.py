@@ -84,8 +84,14 @@ def update_note(note_id: str, **fields) -> None:
     notes = load_notes(include_deleted=True, include_shared=False)
     for n in notes:
         if n["id"] == note_id:
-            n.update({k: v for k, v in fields.items() if k in ("fact", "letter_ids", "persons", "deleted")})
-            n["updated"] = _now()
+            changes = {k: v for k, v in fields.items() if k in ("fact", "letter_ids", "persons", "deleted")}
+            if any(n.get(k) != v for k, v in changes.items()):
+                # keep the earlier wording: a correction is a reading too, and readings have a history
+                n.setdefault("history", []).append({"when": n.get("updated") or n["created"], "fact": n["fact"],
+                                                    "letter_ids": n.get("letter_ids", []),
+                                                    "deleted": n.get("deleted", False)})
+                n.update(changes)
+                n["updated"] = _now()
     _write(notes)
 
 

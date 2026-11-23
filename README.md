@@ -97,6 +97,11 @@ nodegoat database, and her corrections take precedence over every automatic resu
    it with one click. Her corrections are read-only there. Users can still add corrections of their own, but
    those stay on their own computer; only the historian publishes.
 
+Corrections do not overwrite the past. Every checked mention keeps the machine's suggestion and every later
+reading by the historian (when, from which export), together with her doubts in her own words ("not sure which
+son"). The chatbot mentions those doubts, can explain how a person in a letter was identified and whether that
+changed, and the *Chatbot data* page shows the history of all readings.
+
 Errors in the source metadata itself (a wrong sender, a wrong date) are corrected in nodegoat, which remains the
 reference database; a new nodegoat export then updates the counts in Navapp.
 

@@ -53,7 +53,12 @@ is van Alexandre Robert, niet van Louis-Léopold"), roep dan remember_correction
 Bevestig daarna kort dat je het onthouden hebt. Niet bij vragen, twijfels of meningen, en niet als de \
 onderzoeker iets bevestigt wat al klopt. Is de correctie onduidelijk, vraag dan eerst wat bedoeld wordt.
 12. Correcties van het onderzoeksteam gaan voor op metadata, automatische koppelingen en transcripties. \
-Ze veranderen de statistiek-tabellen niet: zeg het als een correctie een getal zou beïnvloeden."""
+Ze veranderen de statistiek-tabellen niet: zeg het als een correctie een getal zou beïnvloeden.
+13. Noteerde de historicus twijfel of een opmerking bij een persoon in een fragment ("Twijfel of opmerking \
+van de historicus"), vermeld die twijfel als je over die persoon spreekt, in plaats van de identificatie als \
+zeker voor te stellen.
+14. Vraagt de onderzoeker hoe een persoon geïdentificeerd werd, door wie, of of dat veranderde, gebruik dan \
+identification_history voor die brief."""
 
 MAX_SEARCHES = 2
 
@@ -94,6 +99,10 @@ TOOLS = [
     _tool("list_letters", "List the letters matching the filters (date, sender, recipient, archive).",
           {"limit": {"type": "integer"}, **_FILTERS}),
     _tool("collection_overview", "Total number of letters, how many are transcribed, and per archive.", {}),
+    _tool("identification_history", "How the persons in one letter were identified: the machine's suggestion, "
+          "every reading by the historian (when, from which source) and her doubts.",
+          {"letter_id": {"type": "string"}, "person": {"type": "string", "description": "optional: only this name"}},
+          ["letter_id"]),
     _tool("remember_correction", "Store a correction of a fact, given by the researcher, so that it is used in all "
           "later conversations.",
           {"fact": {"type": "string", "description": "the corrected fact as one self-contained sentence"},
@@ -113,6 +122,25 @@ def _fragment(i: int, r: dict) -> str:
 def _run_tool(name: str, args: dict, searcher: Searcher, sources: list[dict], ui_filters: dict,
               ctx: dict | None = None) -> dict:
     con = searcher.con
+    if name == "identification_history":
+        rows = con.execute("SELECT provenance, persons_linked FROM chunks WHERE lower(letter_id) = lower(?) "
+                           "ORDER BY chunk", (args["letter_id"].strip(),)).fetchall()             if "provenance" in searcher.columns else []
+        seen, out = set(), []
+        for prov, linked in rows:
+            for p in json.loads(prov or "[]"):
+                key = (p["surface"], p["person"], p["status"])
+                want = (args.get("person") or "").lower()
+                if key in seen or (want and want not in (p["surface"] + " " + p["person"] + " " + p["machine"]).lower()):
+                    continue
+                seen.add(key)
+                out.append(p)
+        if not rows:
+            return {"error": "Deze brief heeft geen transcriptie in de chatbot."}
+        if not out:
+            auto = sorted({n for _, linked in rows for n in json.loads(linked or "[]")})
+            return {"checked_by_historian": False,
+                    "automatic_links": auto, "note": "Deze brief is nog niet nagekeken: alleen automatische koppelingen."}
+        return {"checked_by_historian": True, "mentions": out[:40]}
     if name == "remember_correction":
         ctx = {} if ctx is None else ctx
         note = memory.add_note(args.get("fact", ""), args.get("letter_ids"), args.get("persons"),
@@ -210,7 +238,7 @@ def answer_with_tools(query: str, searcher: Searcher, model: str = "anthropic/cl
                 out = _run_tool(name, args, searcher, sources, ui_filters, ctx)
             except Exception as e:  # noqa: BLE001 - report tool errors back to the model
                 args, out = {}, {"error": f"{type(e).__name__}: {e}"}
-            if name not in ("search_letters", "find_person", "remember_correction") and "error" not in out:
+            if name not in ("search_letters", "find_person", "remember_correction", "identification_history") and "error" not in out:
                 results.append({"tool": name, "args": args, "result": out})
             messages.append({"role": "tool", "tool_call_id": call["id"],
                              "content": json.dumps(out, ensure_ascii=False, default=str)[:20000]})

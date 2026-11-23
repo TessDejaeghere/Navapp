@@ -1,4 +1,4 @@
 {
- "version": "2026.11.23.2",
- "notes": "Fien can publish her corrections to GitHub, and every Navapp can load them with one click (Chatbot data page)."
+ "version": "2026.11.23.3",
+ "notes": "Every identification keeps its history (machine suggestion, the historian's readings) and her doubts; the chatbot mentions doubts and can explain how a person was identified. After updating, upload your latest OpenRefine export once more to fill in this history."
 }

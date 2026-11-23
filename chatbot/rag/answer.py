@@ -34,6 +34,8 @@ def _context_block(i: int, r: dict) -> str:
     ents = []
     if r.get("persons_checked"):
         ents.append("Personen in dit fragment (nagekeken door een onderzoeker): " + ", ".join(r["persons_checked"]))
+    if r.get("doubts"):
+        ents.append("Twijfel of opmerking van de historicus: " + " | ".join(r["doubts"]))
     if r["persons_linked"]:
         ents.append("Gekoppelde personen (automatische suggestie): " + ", ".join(r["persons_linked"]))
     if r["places"]:
