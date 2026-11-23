@@ -12,5 +12,4 @@ sentence-transformers
 huggingface_hub
 --extra-index-url https://download.pytorch.org/whl/cpu
 torch
-# only for the standalone chatbot (chatbot/app/chainlit_app.py)
-chainlit
+# The standalone Chainlit chatbot (chatbot/app/chainlit_app.py) also needs: pip install chainlit

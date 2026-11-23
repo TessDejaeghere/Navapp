@@ -31,7 +31,9 @@ DIST = REPO / "dist" / "navapp"
 # (source, keep-relative-path) — module REPO resolution relies on the layout
 # staying identical to the research repo.
 FILES = [
-    "navapp.py",                                    # entry: Pipeline, Chatbot, Chatbot data pages
+    "navapp.py",
+    "navapp_update.py",                             # update check and installer (GitHub)
+    "navapp_version.json",                                    # entry: Pipeline, Chatbot, Chatbot data pages
     "pipeline_app.py",
     "navapp_pages/chat.py",
     "navapp_pages/chat_data.py",
@@ -215,7 +217,8 @@ def main() -> None:
     if missing:
         raise SystemExit(f"Missing sources, dist incomplete: {missing}")
 
-    (DIST / "requirements.txt").write_text(REQUIREMENTS, encoding="utf-8")
+    # the same file as in the GitHub repo, so an update only reinstalls packages when they really changed
+    shutil.copy2(REPO / "tools" / "navapp_requirements.txt", DIST / "requirements.txt")
     (DIST / "setup.bat").write_text(SETUP_BAT, encoding="utf-8")
     (DIST / "README.txt").write_text(README, encoding="utf-8")
     (DIST / "config").mkdir(exist_ok=True)  # the app saves the API key here

@@ -298,6 +298,17 @@ de kolommen "Spouse of" en "Family of" uit de personenlijst nog niet.
   naar de private repo [TessDejaeghere/Navapp](https://github.com/TessDejaeghere/Navapp) (alleen code, geen
   data of sleutels).
 - **Desktoppakket voor Fien:** `tools/build_navapp_dist.py --zip` maakt `dist/navapp.zip` (± 530 MB, met
-  model, index en correcties, zonder OpenRouter-sleutel).
+  model, index en correcties, zonder OpenRouter-sleutel). Dat is alleen nodig voor de eerste installatie.
+- **Automatische updates:** Navapp vraagt bij het opstarten (en daarna elk uur) aan de openbare GitHub-repo
+  of er een nieuwere versie is (`navapp_version.json`, met versienummer en wat er nieuw is). Is dat zo, dan
+  krijgt Fien een melding en een knop "Install the update" in de zijbalk. De app haalt dan de repo op en
+  vervangt alleen code; vervangen bestanden komen in `_backup/<oude versie>/`. Zijn de benodigde
+  Python-pakketten veranderd, dan installeert de app die ook. Daarna herstart Fien Navapp.
+- **Een update uitbrengen:** na een wijziging in de onderzoeksrepo:
+  `python tools/export_navapp_repo.py --release "wat er nieuw is"`, daarna commit en push in de Navapp-repo.
+  Zonder `--release` krijgt Fien geen melding, zodat tussentijdse pushes haar niet storen.
 - **Fiens eigen gegevens:** alles wat Fien in de app doet, staat in `chatbot/data` van haar installatie
-  (doorgestuurde brieven, correcties, gesprekken, geheugen). Bij een update moet die map blijven staan.
+  (doorgestuurde brieven, correcties, gesprekken, geheugen). De updater raakt die map nooit aan, net zo min als
+  het model, de personenlijst, `data/` en haar sleutel in `config/`.
+- **Wat niet via GitHub gaat:** een nieuwe index of nieuwe correcties van jouw kant staan niet in de repo
+  (alleen code). Die laadt Fien zelf op de pagina "Chatbot data", of ze krijgt een nieuw pakket.

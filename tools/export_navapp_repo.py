@@ -9,21 +9,26 @@ commit and push in the Navapp repo:
     python tools/export_navapp_repo.py                  # -> C:/Users/tessd/navapp
     python tools/export_navapp_repo.py --target D:/x    # elsewhere
 
-Files that exist only in the Navapp repo (README.md, .gitignore, requirements.txt,
-docs/) are never touched. Files listed here but deleted from the research repo are
+Files that exist only in the Navapp repo (README.md, .gitignore) are never touched.
+
+To ship the change to Fien, add --release with a short note; her Navapp then offers the update:
+
+    python tools/export_navapp_repo.py --release "Funny messages while the chatbot works" Files listed here but deleted from the research repo are
 reported, not removed.
 """
 from __future__ import annotations
 
 import argparse
+import json
 import shutil
+from datetime import date
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
 
 CODE = [
     # the app
-    "navapp.py", "pipeline_app.py", "start_navapp.bat", ".streamlit/config.toml",
+    "navapp.py", "navapp_update.py", "navapp_version.json", "pipeline_app.py", "start_navapp.bat", ".streamlit/config.toml",
     "navapp_pages/chat.py", "navapp_pages/chat_data.py",
     "assets/navapp_logo.png", "assets/navapp_frame.png", "assets/navapp_icon.png",
     "assets/navapp_mark.png", "assets/navapp_wordmark.png",
@@ -43,13 +48,38 @@ CODE = [
     # tooling and documentation
     "tools/build_navapp_dist.py", "tools/export_navapp_repo.py",
 ]
-RENAMED = {"chatbot/RAPPORT_pipeline_en_database.md": "docs/pipeline_en_database.md"}
+RENAMED = {"chatbot/RAPPORT_pipeline_en_database.md": "docs/pipeline_en_database.md",
+           "tools/navapp_requirements.txt": "requirements.txt"}
+VERSION_FILE = REPO / "navapp_version.json"
+
+
+def release(notes: str) -> str:
+    """New version number (today's date, .2 .3 … for more releases on one day) with release notes."""
+    today = date.today().strftime("%Y.%m.%d")
+    try:
+        old = json.loads(VERSION_FILE.read_text(encoding="utf-8"))["version"]
+    except (OSError, ValueError, KeyError):
+        old = ""
+    if old == today or old.startswith(today + "."):
+        n = int(old.split(".")[3]) + 1 if old.count(".") == 3 else 2
+        version = f"{today}.{n}"
+    else:
+        version = today
+    VERSION_FILE.write_text(json.dumps({"version": version, "notes": notes}, ensure_ascii=False, indent=1) + "\n",
+                            encoding="utf-8")
+    return version
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--target", default=str(Path.home() / "navapp"))
-    target = Path(ap.parse_args().target)
+    ap.add_argument("--release", metavar="NOTES",
+                    help="publish a new version for Fien: bumps navapp_version.json with these release notes, "
+                         "so her Navapp shows an update notice after you push")
+    args = ap.parse_args()
+    target = Path(args.target)
+    if args.release:
+        print("New version:", release(args.release))
     missing, copied = [], 0
     for src_rel, dst_rel in [(f, f) for f in CODE] + list(RENAMED.items()):
         src = REPO / src_rel
