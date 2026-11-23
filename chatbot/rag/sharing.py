@@ -61,7 +61,16 @@ def local_manifest() -> dict:
 def check() -> dict:
     """{'published', 'by', ..., 'new': bool} or {'error'}; never raises."""
     try:
-        remote = json.loads(_fetch("manifest.json", timeout=8))
+        try:
+            remote = json.loads(_fetch("manifest.json", timeout=8))
+        except urllib.error.HTTPError as e:
+            if e.code != 404 or os.environ.get("NAVAPP_SHARED_SOURCE"):
+                raise
+            # raw.githubusercontent.com keeps a 'not found' for a few minutes after the first publication;
+            # the API is not cached (60 unauthenticated calls per hour, plenty for an hourly check)
+            remote = json.loads(_open(urllib.request.Request(
+                API + "manifest.json", headers={"User-Agent": "Navapp", "Accept": "application/vnd.github.raw+json"}),
+                timeout=8))
     except urllib.error.HTTPError as e:
         return {"error": "nothing published yet" if e.code == 404 else f"HTTP {e.code}"}
     except Exception as e:  # noqa: BLE001 - offline etc.: the app keeps working
