@@ -1,12 +1,27 @@
+<p align="center">
+  <img src="assets/navapp_logo.png" alt="Navapp logo: François-Joseph Navez, winking, in a gold frame" width="220">
+</p>
+
+<p align="center"><i>Ask Navez — or rather, his letters.</i></p>
+
 # Navapp
 
-Navapp is a Streamlit app for the Navez letter collection (GhentCDH, Navez Project). It has three pages:
+Navapp is a Streamlit app for the correspondence of the Belgian painter François-Joseph Navez (1787–1869),
+built for the Navez Project at GhentCDH. It takes letters from scan to searchable source: handwritten text
+recognition, named entities, person clusters and links to the nodegoat person list, and a chatbot that
+answers questions about the letters with citations, or with exact counts from the nodegoat metadata.
+
+<p align="center">
+  <img src="docs/img/chat_screenshot.png" alt="The Navapp chatbot answering 'What did Portaels see in the museum of Turin?' with cited letter fragments" width="800">
+</p>
+
+The app has three pages:
 
 | Page | What it does |
 |---|---|
 | **Pipeline** (`pipeline_app.py`) | Turns letter scans into transcriptions, entities, person clusters and links to the nodegoat person list, then sends the letters to the chatbot. |
-| **Chatbot** (`navapp_pages/chat.py`) | Answers questions about the letters with cited sources. Counting questions use the nodegoat metadata. |
-| **Chatbot data** (`navapp_pages/chat_data.py`) | Manages uploaded letters, loads a new nodegoat export and rebuilds the index. |
+| **Chatbot** (`navapp_pages/chat.py`) | Answers questions about the letters with cited sources (Dutch, English or French). Counting questions use the nodegoat metadata. Conversations are saved, and facts a researcher corrects are remembered in later answers. |
+| **Chatbot data** (`navapp_pages/chat_data.py`) | Manages uploaded letters, imports the person corrections made in OpenRefine, shows and edits what the chatbot remembers, loads a new nodegoat export and rebuilds the index. |
 
 How the pipeline works, and which data and metadata the chatbot database holds, is described in
 [docs/pipeline_en_database.md](docs/pipeline_en_database.md) (in Dutch).
@@ -61,12 +76,17 @@ python -m venv .venv
 On Windows, `start_navapp.bat` does the last step. The reranker
 (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) is downloaded from Hugging Face on first use.
 
-## Updating this repo
+## Updates
+
+Installed copies of Navapp check `navapp_version.json` in this repo at start-up (and then hourly). When a newer
+version is out, the sidebar shows what is new and an **Install the update** button. The updater
+(`navapp_update.py`) replaces code only; the user's data in `chatbot/data`, the model, the person list and the
+key are never touched, and replaced files are kept in `_backup/`.
 
 Development happens in the Navez research repo. After a change there:
 
 ```powershell
-python tools/export_navapp_repo.py
+python tools/export_navapp_repo.py --release "What is new, in one sentence"
 ```
 
-Then commit and push here.
+Then commit and push here. Without `--release` the code is updated but installed copies get no notice.
