@@ -11,6 +11,10 @@ built for the Navez Project at GhentCDH. It takes letters from scan to searchabl
 recognition, named entities, person clusters and links to the nodegoat person list, and a chatbot that
 answers questions about the letters with citations, or with exact counts from the nodegoat metadata.
 
+The machine does the first pass; the project historian has the final word. She checks the persons the pipeline
+found, corrects the chatbot where it is wrong, and from time to time publishes her corrections, so that every
+copy of Navapp works with the same verified knowledge (see [Corrections](#corrections-the-historian-decides)).
+
 <p align="center">
   <img src="docs/img/chat_screenshot.png" alt="The Navapp chatbot answering 'What did Portaels see in the museum of Turin?' with cited letter fragments" width="800">
 </p>
@@ -38,7 +42,7 @@ CLUSTERING_pipeline/       clustering rule, person linking, LLM shared-surname c
 chatbot/rag/               retrieval (FTS5 + embeddings + reranker), statistics, agent with tools
 chatbot/scripts/           build corpus and index, command-line questions, evaluations
 chatbot/app/               standalone Chainlit version of the chatbot
-tools/                     build the desktop package for Fien, export code to this repo
+tools/                     build the desktop package, export code to this repo
 assets/, .streamlit/       logo and theme
 ```
 
@@ -76,13 +80,25 @@ python -m venv .venv
 On Windows, `start_navapp.bat` does the last step. The reranker
 (`cross-encoder/mmarco-mMiniLMv2-L12-H384-v1`) is downloaded from Hugging Face on first use.
 
-## Sharing corrections
+## Corrections: the historian decides
 
-Corrections are made by Fien, the project's authority on the collection, and stay on her computer until she
-publishes them from the *Chatbot data* page. They go to the public repo
-[TessDejaeghere/Navapp-corrections](https://github.com/TessDejaeghere/Navapp-corrections) (facts corrected in the
-chat, and the persons she checked in OpenRefine; never conversations or letters). Every other Navapp shows a
-notice when she published something new and loads it with one click.
+Everything Navapp produces automatically (transcriptions, recognised names, links to persons, chatbot answers) is
+a suggestion. The authority on the collection is the project historian, who knows the correspondents and the
+nodegoat database, and her corrections take precedence over every automatic result.
+
+1. **She corrects.** She checks the pipeline's person mentions in OpenRefine (which person is meant, which
+   mention is not a person at all, who sent the letter) and corrects the chatbot in the chat when it states a
+   wrong fact. Both are used right away in her own Navapp.
+2. **She publishes, when she chooses.** Her corrections stay on her computer until she publishes them from the
+   *Chatbot data* page, typically after finishing a batch. Each publication replaces the previous one in
+   [TessDejaeghere/Navapp-corrections](https://github.com/TessDejaeghere/Navapp-corrections): the facts she
+   corrected in the chat and the persons she checked. Conversations and letters are never published.
+3. **Everyone else follows.** Other copies of Navapp show a notice when she has published something new and load
+   it with one click. Her corrections are read-only there. Users can still add corrections of their own, but
+   those stay on their own computer; only the historian publishes.
+
+Errors in the source metadata itself (a wrong sender, a wrong date) are corrected in nodegoat, which remains the
+reference database; a new nodegoat export then updates the counts in Navapp.
 
 ## Updates
 
