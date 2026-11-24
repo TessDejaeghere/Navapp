@@ -27,7 +27,8 @@ The app has three pages:
 | **Chatbot** (`navapp_pages/chat.py`) | Answers questions about the letters with cited sources (Dutch, English or French). Counting questions use the nodegoat metadata. Conversations are saved, and facts a researcher corrects are remembered in later answers. |
 | **Chatbot data** (`navapp_pages/chat_data.py`) | Manages uploaded letters, imports the person corrections made in OpenRefine, shows and edits what the chatbot remembers, loads a new nodegoat export and rebuilds the index. |
 
-How the pipeline works, and which data and metadata the chatbot database holds, is described in
+A step-by-step user guide is in [docs/HANDLEIDING.md](docs/HANDLEIDING.md) (in Dutch). How the pipeline works,
+and which data and metadata the chatbot database holds, is described in
 [docs/pipeline_en_database.md](docs/pipeline_en_database.md) (in Dutch).
 
 ## Layout
