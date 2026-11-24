@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24",
- "notes": "Clear message when the NER model is missing, instead of stopping silently"
+ "version": "2026.11.24.2",
+ "notes": "Load existing transcriptions in bulk (text files, zip or CSV) and add letters to the current batch"
 }

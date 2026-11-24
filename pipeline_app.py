@@ -37,6 +37,7 @@ import json
 import re
 import sys
 import tempfile
+import traceback
 import zipfile
 from pathlib import Path
 
@@ -111,14 +112,21 @@ def ner_resources():
     # resolve_checkpoint and load_model come from the batch script and stop with SystemExit when
     # something is missing; inside Streamlit that ends the run silently, so turn it into an error.
     try:
+        log(f"loading the NER model from {CKPT_ROOT} …")
         ckpt = resolve_checkpoint(CKPT_ROOT)
         model = load_model(ckpt, "cpu")
+        log("NER model loaded; loading the tokenizer …")
         id2label = {int(k): v for k, v in model.config.id2label.items()}
         tok_src = ckpt if (ckpt / "tokenizer_config.json").exists() else BASE_MODEL
         tokenizer = AutoTokenizer.from_pretrained(tok_src, add_prefix_space=True)
     except SystemExit as e:
         raise RuntimeError(str(e)) from None
     return tokenizer, model, id2label
+
+
+def log(msg: str) -> None:
+    """A line in the terminal window, so that a crash there shows how far the pipeline got."""
+    print(f"[Navapp pipeline] {msg}", flush=True)
 
 
 def ner_problem() -> str | None:
@@ -257,6 +265,7 @@ def run_ner(text: str) -> list[tuple[int, int, str]]:
 
     tokenizer, model, id2label = ner_resources()
     windows = encode_letter(tokenizer, text)
+    log(f"recognising entities: {len(text)} characters, {len(windows)} window(s)")
     provenance = [{"letter_id": "L", "offset_mapping": w["offset_mapping"]} for w in windows]
     preds = []
     with torch.no_grad():
@@ -452,6 +461,70 @@ def letters_from_zip(data: bytes) -> dict[str, list[tuple[str, bytes]]]:
     return out
 
 
+TEXT_EXTS = (".txt", ".md")
+TABLE_EXTS = (".csv", ".tsv")
+COLUMN_NAMES = {   # accepted column names in a transcription table (lower case)
+    "letter_id": ("letter_id", "letter id", "letter", "id", "brief", "brief_id", "brief-id", "briefid"),
+    "text": ("text", "transcription", "transcriptie", "tekst", "transcript"),
+    "sender": ("sender", "afzender", "from"),
+    "receiver": ("receiver", "recipient", "ontvanger", "to", "addressee"),
+    "year": ("year", "jaar", "date", "datum"),
+}
+
+
+def _decode(data: bytes) -> str:
+    for enc in ("utf-8-sig", "cp1252"):
+        try:
+            return data.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return data.decode("utf-8", errors="replace")
+
+
+def _transcription_table(name: str, data: bytes) -> list[dict]:
+    """A CSV/TSV with one letter per row: letter ID and text, optionally sender, recipient, year."""
+    sep = "\t" if name.lower().endswith(".tsv") else None
+    df = pd.read_csv(io.StringIO(_decode(data)), sep=sep, engine="python", dtype=str).fillna("")
+    cols = {c.strip().lower(): c for c in df.columns}
+    found = {key: next((cols[a] for a in aliases if a in cols), None) for key, aliases in COLUMN_NAMES.items()}
+    if not (found["letter_id"] and found["text"]):
+        raise ValueError(f"{name}: needs a column for the letter ID (e.g. 'letter_id') and one for the "
+                         f"text (e.g. 'text' or 'transcription'); found: {', '.join(df.columns)}")
+    out = []
+    for _, r in df.iterrows():
+        lid, text = r[found["letter_id"]].strip(), r[found["text"]].strip()
+        if lid and text:
+            out.append({"letter_id": lid, "text": text,
+                        **{k: (r[found[k]].strip() if found[k] else "") for k in ("sender", "receiver", "year")}})
+    return out
+
+
+def letters_from_transcriptions(files: list[tuple[str, bytes]]) -> list[dict]:
+    """Existing transcriptions in bulk: .txt files (the file name is the letter ID), zips of them,
+    or a CSV/TSV table with one letter per row. Returns letters ready for entity extraction."""
+    found: list[dict] = []
+    for name, data in files:
+        low = name.lower()
+        if low.endswith(".zip"):
+            with zipfile.ZipFile(io.BytesIO(data)) as zf:
+                inner = [(n, zf.read(n)) for n in sorted(zf.namelist())
+                         if not n.endswith("/") and not Path(n).name.startswith((".", "__"))
+                         and n.lower().endswith(TEXT_EXTS + TABLE_EXTS)]
+            found += letters_from_transcriptions(inner)
+        elif low.endswith(TABLE_EXTS):
+            found += _transcription_table(Path(name).name, data)
+        elif low.endswith(TEXT_EXTS):
+            text = _decode(data).strip()
+            if text:
+                found.append({"letter_id": Path(name).stem.strip(), "text": text,
+                              "sender": "", "receiver": "", "year": ""})
+    letters, seen = [], {}
+    for L in found:   # a letter ID that occurs twice keeps its last text
+        seen[L["letter_id"]] = {**L, "images": [], "text_source": "manual"}
+    letters = list(seen.values())
+    return letters
+
+
 def letters_from_folder(root: Path) -> dict[str, list[tuple[str, Path]]]:
     """Same grouping as the zip, but images stay on disk and load lazily —
     the right mode for multi-GB batches on Fien's own machine."""
@@ -588,7 +661,7 @@ st.subheader("Step 1 — letter input")
 mode = st.radio("Input type",
                 ["Images of one letter", "Zip with several letters",
                  "Folder on this computer", "IIIF manifest URL",
-                 "Paste an existing transcription"],
+                 "Paste an existing transcription", "Transcriptions in bulk"],
                 horizontal=True, label_visibility="collapsed")
 
 with st.form("input_form"):
@@ -622,20 +695,38 @@ with st.form("input_form"):
                                  placeholder="https://iiif.kbr.be/manifest/v3/846164 "
                                              "(several manifests: separate with | )")
         st.caption("Pages are downloaded from the IIIF server (Presentation API v3 or v2).")
-    else:
+    elif mode == "Paste an existing transcription":
         c1, c2, c3, c4 = st.columns(4)
         lid = c1.text_input("Letter ID *")
         sender = c2.text_input("Sender")
         receiver = c3.text_input("Recipient")
         year = c4.text_input("Year")
         pasted = st.text_area("Transcription", height=200)
+    else:
+        tfiles = st.file_uploader("Text files, a zip of text files, or a table (CSV/TSV)",
+                                  type=["txt", "md", "zip", "csv", "tsv"], accept_multiple_files=True)
+        st.caption("**Text files:** one letter per file; the file name is the letter ID "
+                   "(e.g. `Letter 144.txt`). **Table:** one letter per row, with a column `letter_id` "
+                   "and a column `text` (or `transcription`), and optionally `sender`, `recipient` and "
+                   "`year`. Missing senders, recipients and years can be filled in below, or are taken "
+                   "from the nodegoat overview when the letters go to the chatbot.")
+    add_to_batch = False
+    if st.session_state.letters:
+        add_to_batch = st.checkbox(
+            f"Add to the {len(st.session_state.letters)} letter(s) already loaded, instead of "
+            "replacing them", value=True,
+            help="Lets you combine sources in one batch, e.g. a zip of scans and a set of existing "
+                 "transcriptions, and export all their entities in one CSV. A letter loaded again "
+                 "replaces its earlier version.")
     submitted = st.form_submit_button("Load letter(s)", type="primary")
 
 if submitted:
+    previous = list(st.session_state.letters) if add_to_batch else []
     st.session_state.letters = []
     st.session_state.pop("result", None)
     # clear stale per-letter widget state from a previous load, otherwise old
-    # (possibly empty) text areas shadow freshly loaded/transcribed content
+    # (possibly empty) text areas shadow freshly loaded/transcribed content;
+    # letters kept in the batch carry their edits in the letter itself
     for k in list(st.session_state.keys()):
         if k.startswith(("txt_", "snd_", "rcv_", "yr_")):
             del st.session_state[k]
@@ -688,7 +779,7 @@ if submitted:
                     "year": year, "images": pages, "text": "",
                     "text_source": "opus_htr"}]
                 st.success(f"Downloaded {len(pages)} pages.")
-    else:
+    elif mode == "Paste an existing transcription":
         if not lid or not pasted.strip():
             st.error("Letter ID and transcription are both required.")
         else:
@@ -696,6 +787,28 @@ if submitted:
                 "letter_id": lid, "sender": sender, "receiver": receiver,
                 "year": year, "images": [], "text": pasted.strip(),
                 "text_source": "manual"}]
+    else:
+        if not tfiles:
+            st.error("Upload one or more text files, a zip or a table.")
+        else:
+            try:
+                found = letters_from_transcriptions([(f.name, f.getvalue()) for f in tfiles])
+            except Exception as e:  # noqa: BLE001
+                st.error(f"Could not read the transcriptions: {e}")
+                found = []
+            if found:
+                st.session_state.letters = found
+                st.success(f"Loaded {len(found)} transcription(s).")
+            elif tfiles:
+                st.error("No transcriptions found in these files.")
+
+    if previous:
+        new_ids = {L["letter_id"] for L in st.session_state.letters}
+        kept = [L for L in previous if L["letter_id"] not in new_ids]
+        st.session_state.letters = kept + st.session_state.letters
+        if st.session_state.letters != kept:
+            st.info(f"The batch now holds {len(st.session_state.letters)} letters "
+                    f"({len(kept)} kept, {len(new_ids)} added or replaced).")
 
 letters = st.session_state.letters
 if letters:
@@ -763,10 +876,14 @@ if letters:
         try:
             with st.spinner("Extracting entities …"):
                 df = build_mentions(ready)
-        except Exception as e:  # noqa: BLE001 - show the reason instead of a silent stop
-            st.error(f"The entity extraction stopped: {e}\n\nThe first run also downloads the "
-                     "d'AlemBERT settings from Hugging Face, so it needs an internet connection.")
+        except (Exception, SystemExit) as e:  # noqa: BLE001 - show the reason instead of a silent stop
+            log("entity extraction FAILED:")
+            traceback.print_exc()
+            st.error(f"The entity extraction stopped: {type(e).__name__}: {e}\n\nThe first run also "
+                     "downloads the d'AlemBERT settings from Hugging Face, so it needs an internet "
+                     "connection. The full error is in the terminal window.")
             st.stop()
+        log(f"entity extraction done: {len(df)} person mentions")
         st.session_state.processed = [{k: L.get(k, "") for k in ("letter_id", "sender", "receiver", "year",
                                                                   "text", "text_source")} for L in ready]
         st.session_state.pop("chatbot_sent", None)
@@ -806,7 +923,7 @@ if "result" in st.session_state:
         st.caption(f"LLM adjudication — {note}")
     st.dataframe(
         df[["letter_id", "label", "surface", "suggested_cluster", "cluster_size",
-            "suggested_person_name", "link_stage", "link_score"]],
+            "suggested_person_name", "link_stage", "link_score"]].astype(str),
         width="stretch", height=380)
     st.download_button(
         "⬇️ Download mention CSV",
