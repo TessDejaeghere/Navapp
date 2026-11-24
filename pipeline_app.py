@@ -67,7 +67,13 @@ import llm_adjudicate_shared_surnames as adj  # noqa: E402
 KEY_FILE = REPO / "config" / "key_openrouter.txt"
 CKPT_ROOT = REPO / "NER_pipeline" / "ckpts" / "dalembert_fold2" / "checkpoint-450"
 HISTORY_CSV = REPO / "data" / "navapp_history.csv"
-CONTEXT_WORDS = 25
+CONTEXT_SENTENCES = 2       # whole sentences before and after the mention's own sentence
+CONTEXT_MAX_WORDS = 200     # cap per side, as in the Batch 1 export
+# words that end with a full stop without ending the sentence (lower case, without the stop);
+# a single capital letter (an initial, as in J.-L. David) never ends one either
+ABBREVIATIONS = {"m", "mr", "mm", "mme", "mmes", "mlle", "mlles", "mgr", "st", "ste", "dr", "messrs",
+                 "cie", "cte", "ctesse", "bon", "bne", "vve", "vte", "sr", "pp", "cf", "vol"}
+SENTENCE_END = re.compile(r"[.!?…]+[»\"')\]]*\s+(?=[«\"'(\[]?[A-ZÀ-ÖØ-Þ])|\n\s*\n")
 
 LINK_METHOD = "token_set"
 LINK_THRESHOLD = 90.0
@@ -282,9 +288,32 @@ def run_ner(text: str) -> list[tuple[int, int, str]]:
     return sorted(spans.get("L", set()))
 
 
-def context_window(text: str, start: int, end: int) -> tuple[str, str]:
-    before = " ".join(text[:start].split()[-CONTEXT_WORDS:])
-    after = " ".join(text[end:].split()[:CONTEXT_WORDS])
+def sentence_starts(text: str) -> list[int]:
+    """Offsets where sentences begin. A full stop after an abbreviation (M., Mme., St.) or an initial
+    (J.-L.) does not end a sentence; a blank line always does."""
+    starts = [0]
+    for m in SENTENCE_END.finditer(text):
+        if m.group(0)[0] == ".":
+            word = text[:m.start()].split()[-1:] or [""]
+            word = word[0].strip("«\"'([").split("-")[-1]
+            if word.lower() in ABBREVIATIONS or (len(word) == 1 and word.isupper()):
+                continue
+        starts.append(m.end())
+    return starts
+
+
+def context_window(text: str, start: int, end: int, n_sentences: int = CONTEXT_SENTENCES,
+                   starts: list[int] | None = None) -> tuple[str, str]:
+    """The mention's own sentence plus n whole sentences before and after it, at most
+    CONTEXT_MAX_WORDS words per side."""
+    starts = starts if starts is not None else sentence_starts(text)
+    first = max(i for i, b in enumerate(starts) if b <= start)
+    last = max(i for i, b in enumerate(starts) if b < max(end, start + 1))
+    lo = starts[max(0, first - n_sentences)]
+    hi_idx = last + 1 + n_sentences
+    hi = starts[hi_idx] if hi_idx < len(starts) else len(text)
+    before = " ".join(text[lo:start].split()[-CONTEXT_MAX_WORDS:])
+    after = " ".join(text[end:hi].split()[:CONTEXT_MAX_WORDS])
     return before, after
 
 
@@ -294,14 +323,16 @@ def build_mentions(letters: list[dict]) -> pd.DataFrame:
 
     rows = []
     all_spans = st.session_state.setdefault("ner_spans", {})
+    n_ctx = st.session_state.get("context_sentences", CONTEXT_SENTENCES)
     for L in letters:
         spans = run_ner(L["text"])
+        starts = sentence_starts(L["text"])
         all_spans[L["letter_id"]] = spans   # every label, also LOC/ORG/ART/EVT, for the chatbot
         for s, e, lab in spans:
             if lab not in ("PER", "PER_NOM"):
                 continue
             surface = L["text"][s:e]
-            before, after = context_window(L["text"], s, e)
+            before, after = context_window(L["text"], s, e, n_ctx, starts)
             mid = hashlib.md5(f"{L['letter_id']}::{s}-{e}".encode()).hexdigest()[:10]
             rows.append({
                 "mention_id": mid, "letter_id": L["letter_id"],
@@ -596,6 +627,11 @@ with st.sidebar:
                "(typically a handful per batch)")
     do_link = st.toggle("4 · Person linking (nodegoat glossary)", value=True)
     st.caption("free — matches against the person list")
+    st.slider("Context in the CSV: sentences before and after", 0, 6, CONTEXT_SENTENCES,
+              key="context_sentences",
+              help="The columns context_before and context_after hold the mention's own sentence plus this "
+                   f"many whole sentences on either side (at most {CONTEXT_MAX_WORDS} words per side), "
+                   "to make the review in OpenRefine easier.")
 
     st.divider()
     st.header("Settings")

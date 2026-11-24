@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24.3",
- "notes": "Works with pandas 3 (entity linking); clearer message when OpenRouter credit runs out"
+ "version": "2026.11.24.4",
+ "notes": "Context of a few whole sentences around every mention in the CSV (adjustable in the sidebar)"
 }
