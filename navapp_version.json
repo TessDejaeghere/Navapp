@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24.5",
- "notes": "The chatbot can search the historian's remarks across the collection (e.g. doubts about the OCR)"
+ "version": "2026.11.24.6",
+ "notes": "Every pipeline run is kept: overview of letters already processed, reopen a run, all mentions in one CSV"
 }

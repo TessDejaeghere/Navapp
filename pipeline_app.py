@@ -67,6 +67,7 @@ import llm_adjudicate_shared_surnames as adj  # noqa: E402
 KEY_FILE = REPO / "config" / "key_openrouter.txt"
 CKPT_ROOT = REPO / "NER_pipeline" / "ckpts" / "dalembert_fold2" / "checkpoint-450"
 HISTORY_CSV = REPO / "data" / "navapp_history.csv"
+RUNS_DIR = REPO / "data" / "pipeline_runs"   # every run: its mention CSV and its letters, to reopen later
 CONTEXT_SENTENCES = 2       # whole sentences before and after the mention's own sentence
 CONTEXT_MAX_WORDS = 200     # cap per side, as in the Batch 1 export
 # words that end with a full stop without ending the sentence (lower case, without the stop);
@@ -214,6 +215,66 @@ def known_letters() -> dict[str, str]:
         for r in hist.itertuples():
             add(r.letter_id, f"processed in this app on {r.date}")
     return info
+
+
+def save_run(df: pd.DataFrame, letters: list[dict], ner_spans: dict) -> str:
+    """Keep a run on disk (mention CSV + letters with their text), so that it survives a reload."""
+    import datetime
+
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    RUNS_DIR.mkdir(parents=True, exist_ok=True)
+    df.to_csv(RUNS_DIR / f"{stamp}.csv", index=False, encoding="utf-8-sig")
+    ids = {L["letter_id"] for L in letters}
+    (RUNS_DIR / f"{stamp}.json").write_text(json.dumps({
+        "when": datetime.datetime.now().isoformat(timespec="seconds"),
+        "letters": letters, "mentions": len(df),
+        "ner_spans": {k: [list(x) for x in v] for k, v in ner_spans.items() if k in ids},
+    }, ensure_ascii=False), encoding="utf-8")
+    return stamp
+
+
+def list_runs() -> list[dict]:
+    """Earlier runs, newest first: {stamp, when, letters, mentions}."""
+    out = []
+    for js in sorted(RUNS_DIR.glob("*.json"), reverse=True) if RUNS_DIR.exists() else []:
+        try:
+            meta = json.loads(js.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            continue
+        out.append({"stamp": js.stem, "when": meta.get("when", js.stem),
+                    "letter_ids": [L["letter_id"] for L in meta.get("letters", [])],
+                    "mentions": meta.get("mentions", 0)})
+    return out
+
+
+def reopen_run(stamp: str) -> None:
+    meta = json.loads((RUNS_DIR / f"{stamp}.json").read_text(encoding="utf-8"))
+    letters = [{**L, "images": []} for L in meta["letters"]]
+    st.session_state.letters = letters
+    st.session_state.processed = [{k: L.get(k, "") for k in ("letter_id", "sender", "receiver", "year",
+                                                              "text", "text_source")} for L in letters]
+    st.session_state.result = pd.read_csv(RUNS_DIR / f"{stamp}.csv", dtype=str,
+                                          encoding="utf-8-sig").fillna("")[CSV_COLUMNS]
+    st.session_state.ner_spans = {k: [tuple(x) for x in v] for k, v in meta.get("ner_spans", {}).items()}
+    st.session_state.pop("chatbot_sent", None)
+    for k in list(st.session_state.keys()):
+        if k.startswith(("txt_", "snd_", "rcv_", "yr_")):
+            del st.session_state[k]
+
+
+def letters_in_chatbot() -> set[str]:
+    """Letters this app has sent to the chatbot (Step 4)."""
+    up = CHATBOT_DIR / "data" / "corpus" / "uploads.jsonl"
+    if not up.exists():
+        return set()
+    ids = set()
+    with up.open(encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                ids.add(_dup_key(json.loads(line).get("letter_id", "")))
+            except json.JSONDecodeError:
+                continue
+    return ids
 
 
 def record_processed(df: pd.DataFrame) -> None:
@@ -694,6 +755,42 @@ with st.sidebar:
 if "letters" not in st.session_state:
     st.session_state.letters = []
 
+runs = list_runs()
+if runs:
+    with st.expander(f"📚 Letters already through the pipeline ({len(runs)} earlier run(s))",
+                     expanded=not st.session_state.letters):
+        st.caption("Every run is kept on this computer (data/pipeline_runs), also after closing Navapp or "
+                   "an update. Reopen a run to see its entities again or to send it to the chatbot.")
+        in_chat = letters_in_chatbot()
+        seen = {}
+        for r in reversed(runs):   # oldest first, so the newest run of a letter wins
+            for lid in r["letter_ids"]:
+                seen[lid] = r
+        overview = pd.DataFrame([{"letter": lid, "last run": r["when"].replace("T", " ")[:16],
+                                  "in the chatbot": "yes" if _dup_key(lid) in in_chat else "no"}
+                                 for lid, r in sorted(seen.items(), key=lambda x: x[1]["when"], reverse=True)])
+        st.dataframe(overview, hide_index=True, width="stretch", height=min(38 + 35 * len(overview), 300))
+        labels = {r["stamp"]: f"{r['when'].replace('T', ' ')[:16]} — {len(r['letter_ids'])} letter(s), "
+                              f"{r['mentions']} mentions: {', '.join(r['letter_ids'][:3])}"
+                              f"{' …' if len(r['letter_ids']) > 3 else ''}" for r in runs}
+        c1, c2, c3 = st.columns([3, 1, 1])
+        pick = c1.selectbox("Run", list(labels), format_func=labels.get, label_visibility="collapsed")
+        if c2.button("Reopen this run"):
+            reopen_run(pick)
+            st.rerun()
+        c3.download_button("⬇️ Its CSV", (RUNS_DIR / f"{pick}.csv").read_bytes(),
+                           file_name=f"mentions_{pick}.csv", mime="text/csv")
+        frames = [pd.read_csv(RUNS_DIR / f"{r['stamp']}.csv", dtype=str, encoding="utf-8-sig").fillna("")
+                  .assign(_run=r["stamp"]) for r in runs if (RUNS_DIR / f"{r['stamp']}.csv").exists()]
+        if frames:   # a letter run more than once keeps only the mentions of its latest run
+            allm = pd.concat(frames, ignore_index=True)
+            latest = {lid: r["stamp"] for r in reversed(runs) for lid in r["letter_ids"]}
+            allm = allm[allm["_run"] == allm["letter_id"].map(latest)].drop(columns="_run")
+            st.download_button(f"⬇️ All mentions of all runs ({allm['letter_id'].nunique()} letters, "
+                               f"{len(allm)} mentions) as one CSV",
+                               allm.to_csv(index=False).encode("utf-8-sig"),
+                               file_name="mentions_all_runs.csv", mime="text/csv")
+
 st.subheader("Step 1 — letter input")
 mode = st.radio("Input type",
                 ["Images of one letter", "Zip with several letters",
@@ -959,6 +1056,10 @@ if letters:
             st.session_state.result = df[CSV_COLUMNS]
             st.session_state.adj_notes = notes
             record_processed(df)
+            try:
+                save_run(df[CSV_COLUMNS], st.session_state.processed, st.session_state.get("ner_spans", {}))
+            except OSError as e:
+                st.warning(f"The run could not be saved to disk ({e}); download the CSV below.")
 
 if "result" in st.session_state:
     df = st.session_state.result
