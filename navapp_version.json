@@ -1,4 +1,4 @@
 {
- "version": "2026.11.23.4",
- "notes": "Clearer layout of cited sources (persons, their readings and places each on their own line)."
+ "version": "2026.11.24",
+ "notes": "Clear message when the NER model is missing, instead of stopping silently"
 }

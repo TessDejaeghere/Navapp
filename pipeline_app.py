@@ -108,12 +108,31 @@ def ner_resources():
     import torch  # noqa: F401
     from transformers import AutoTokenizer
 
-    ckpt = resolve_checkpoint(CKPT_ROOT)
-    model = load_model(ckpt, "cpu")
-    id2label = {int(k): v for k, v in model.config.id2label.items()}
-    tok_src = ckpt if (ckpt / "tokenizer_config.json").exists() else BASE_MODEL
-    tokenizer = AutoTokenizer.from_pretrained(tok_src, add_prefix_space=True)
+    # resolve_checkpoint and load_model come from the batch script and stop with SystemExit when
+    # something is missing; inside Streamlit that ends the run silently, so turn it into an error.
+    try:
+        ckpt = resolve_checkpoint(CKPT_ROOT)
+        model = load_model(ckpt, "cpu")
+        id2label = {int(k): v for k, v in model.config.id2label.items()}
+        tok_src = ckpt if (ckpt / "tokenizer_config.json").exists() else BASE_MODEL
+        tokenizer = AutoTokenizer.from_pretrained(tok_src, add_prefix_space=True)
+    except SystemExit as e:
+        raise RuntimeError(str(e)) from None
     return tokenizer, model, id2label
+
+
+def ner_problem() -> str | None:
+    """Why the NER model cannot run on this computer, or None when everything is in place."""
+    weights = CKPT_ROOT / "model.safetensors"
+    labels = REPO / "NER_pipeline" / "eval" / "gold_561_merged.jsonl"
+    if not (weights.exists() or (CKPT_ROOT / "config.json").exists()):
+        return (f"The NER model is missing: there is no model file in `{CKPT_ROOT.relative_to(REPO).as_posix()}`. "
+                "It is not on GitHub (it is too large); it comes with the Navapp zip. Copy the folder "
+                "`NER_pipeline/ckpts` from the zip into this Navapp folder and restart Navapp.")
+    if not (CKPT_ROOT / "config.json").exists() and not labels.exists():
+        return (f"The NER model's label list is missing (`{labels.relative_to(REPO).as_posix()}`). Copy the folder "
+                "`NER_pipeline/eval` from the Navapp zip into this Navapp folder and restart Navapp.")
+    return None
 
 
 @st.cache_resource(show_spinner="Loading the person glossary …")
@@ -734,12 +753,20 @@ if letters:
                    "entity extraction). All other enabled stages are free.")
     else:
         st.caption("💰 All enabled stages below are free (they run locally).")
+    problem = ner_problem() if do_ner else None
     if not do_ner:
         st.info("NER is toggled off — enable it to produce the mention CSV.")
+    elif problem:
+        st.error(problem)
     elif st.button(f"Run the pipeline on {len(ready)} letter(s)", type="primary",
                    disabled=not ready):
-        with st.spinner("Extracting entities …"):
-            df = build_mentions(ready)
+        try:
+            with st.spinner("Extracting entities …"):
+                df = build_mentions(ready)
+        except Exception as e:  # noqa: BLE001 - show the reason instead of a silent stop
+            st.error(f"The entity extraction stopped: {e}\n\nThe first run also downloads the "
+                     "d'AlemBERT settings from Hugging Face, so it needs an internet connection.")
+            st.stop()
         st.session_state.processed = [{k: L.get(k, "") for k in ("letter_id", "sender", "receiver", "year",
                                                                   "text", "text_source")} for L in ready]
         st.session_state.pop("chatbot_sent", None)
