@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24.2",
- "notes": "Load existing transcriptions in bulk (text files, zip or CSV) and add letters to the current batch"
+ "version": "2026.11.24.3",
+ "notes": "Works with pandas 3 (entity linking); clearer message when OpenRouter credit runs out"
 }

@@ -372,7 +372,8 @@ def link_mentions(df: pd.DataFrame, clusters: pd.Series) -> pd.DataFrame:
     df["cluster_size"] = df.groupby("suggested_cluster")["mention_id"].transform("size")
     for col in ("suggested_person_id", "suggested_person_name", "link_stage",
                 "link_score", "person_candidates"):
-        df[col] = ""
+        # object, not pandas 3's default 'str' dtype: link_score receives numbers
+        df[col] = pd.Series("", index=df.index, dtype=object)
     per = df[df["label"] == "PER"].copy()
     if per.empty:
         return df
@@ -834,7 +835,19 @@ if letters:
             prog = st.progress(0.0)
             for i, L in enumerate(needs_htr):
                 with st.spinner(f"Transcribing {L['letter_id']} ({len(L['images'])} pages) …"):
-                    L["text"], cost = run_htr(L["images"])
+                    try:
+                        L["text"], cost = run_htr(L["images"])
+                    except Exception as e:  # noqa: BLE001
+                        if getattr(e, "status_code", None) == 402:
+                            st.error(
+                                f"OpenRouter refused the request for lack of credit (402), at "
+                                f"{L['letter_id']}. Either the account balance is too low, or this "
+                                "key's own credit limit is (nearly) used up. Check the balance under "
+                                "Credits and the key's usage and limit under Keys on openrouter.ai; "
+                                "the credits must be in the same account or organisation as the "
+                                f"key.\n\nOpenRouter says: {e}")
+                            st.stop()
+                        raise
                     # seed the widget state, or the (empty) text area rendered
                     # before the click would shadow the new transcription
                     st.session_state[f"txt_{L['letter_id']}"] = L["text"]
@@ -906,7 +919,7 @@ if letters:
                 df["cluster_size"] = df.groupby("suggested_cluster")["mention_id"].transform("size")
                 for col in ("suggested_person_id", "suggested_person_name",
                             "link_stage", "link_score", "person_candidates"):
-                    df[col] = ""
+                    df[col] = pd.Series("", index=df.index, dtype=object)
             st.session_state.result = df[CSV_COLUMNS]
             st.session_state.adj_notes = notes
             record_processed(df)
