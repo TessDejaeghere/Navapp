@@ -12,7 +12,7 @@ import re
 from .answer import SOURCE_LABEL, _context_block
 from .openrouter import chat_with_tools
 from .search import Searcher
-from . import memory, stats
+from . import corrections, memory, stats
 
 MAX_ROUNDS = 6
 
@@ -58,7 +58,12 @@ Ze veranderen de statistiek-tabellen niet: zeg het als een correctie een getal z
 van de historicus"), vermeld die twijfel als je over die persoon spreekt, in plaats van de identificatie als \
 zeker voor te stellen.
 14. Vraagt de onderzoeker hoe een persoon geïdentificeerd werd, door wie, of of dat veranderde, gebruik dan \
-identification_history voor die brief."""
+identification_history voor die brief.
+15. Vragen over de opmerkingen of twijfels van de historicus over de hele collectie (bv. "over welke brieven \
+twijfel je over de OCR?", "waar was je niet zeker van de persoon?", "welke opmerkingen staan er bij Gudin?") \
+beantwoord je met historian_remarks: kind="reading" voor twijfel over de lezing van de bron (OCR/HTR, \
+transcriptie), kind="identification" voor twijfel over wie bedoeld is, of een zoekterm. Geef de brieven met \
+de opmerking in haar eigen woorden en vermeld hoeveel opmerkingen er in totaal zijn."""
 
 MAX_SEARCHES = 2
 
@@ -103,6 +108,15 @@ TOOLS = [
           "every reading by the historian (when, from which source) and her doubts.",
           {"letter_id": {"type": "string"}, "person": {"type": "string", "description": "optional: only this name"}},
           ["letter_id"]),
+    _tool("historian_remarks", "The historian's own remarks and doubts, written while she reviewed the persons "
+          "in the letters (OpenRefine 'Notes'), across the whole collection or for one letter. Use it for questions "
+          "about where she doubted the reading of the source (OCR/HTR) or the identification of a person.",
+          {"kind": {"type": "string", "enum": ["any", "reading", "identification"],
+                    "description": "reading = doubt about the transcription/OCR; identification = doubt about who "
+                                   "is meant; any = all remarks (default)"},
+           "query": {"type": "string", "description": "optional word(s) the remark, the name or the person must contain"},
+           "letter_id": _FILTERS["letter_id"],
+           "limit": {"type": "integer", "description": "maximum remarks returned, default 40"}}),
     _tool("remember_correction", "Store a correction of a fact, given by the researcher, so that it is used in all "
           "later conversations.",
           {"fact": {"type": "string", "description": "the corrected fact as one self-contained sentence"},
@@ -111,6 +125,35 @@ TOOLS = [
            "persons": {"type": "array", "items": {"type": "string"}, "description": "persons concerned (full names)"}},
           ["fact"]),
 ]
+
+
+READING_DOUBT = re.compile(r"ocr|htr|leesbaar|lees ik|lezing|transcri|staat dit|staat er|spel|typo|fout gelezen|"
+                           r"verkeerd gelezen|onleesbaar|niet correct", re.I)
+IDENTIFICATION_DOUBT = re.compile(r"niet zeker|zeker\?|onzeker|misschien|twijfel|\bof\b.*\?|welke|wie is|"
+                                  r"onduidelijk|mogelijk|\?", re.I)
+
+
+def historian_remarks(kind: str = "any", query: str = "", letter_id: str = "", limit: int = 40) -> dict:
+    """Search the historian's remarks in the corrections (one per mention), grouped by letter."""
+    rows = [r for r in corrections.load() if r.get("note")]
+    total = len(rows)
+    if letter_id:
+        rows = [r for r in rows if r["letter_key"] == corrections.letter_key(letter_id)]
+    if kind == "reading":
+        rows = [r for r in rows if READING_DOUBT.search(r["note"])]
+    elif kind == "identification":
+        rows = [r for r in rows if IDENTIFICATION_DOUBT.search(r["note"]) and not READING_DOUBT.search(r["note"])]
+    for word in (query or "").lower().split():
+        rows = [r for r in rows if word in " ".join((r["note"], r.get("surface", ""), r.get("person", ""),
+                                                    r.get("value", ""))).lower()]
+    rows.sort(key=lambda r: (r["letter_id"], r.get("start", 0)))
+    limit = max(1, min(int(limit or 40), 100))
+    out = [{"letter_id": r["letter_id"], "name_in_letter": r.get("surface", ""),
+            "her_reading": r.get("person") or r.get("value") or r.get("status", ""),
+            "remark": r["note"], "context": (r.get("context_before") or "")[-60:]} for r in rows[:limit]]
+    return {"remarks_found": len(rows), "letters": len({r["letter_id"] for r in rows}),
+            "all_remarks_in_collection": total, "shown": len(out), "remarks": out,
+            "note": "Classification into reading/identification is by keywords, so it is approximate."}
 
 
 def _fragment(i: int, r: dict) -> str:
@@ -141,6 +184,8 @@ def _run_tool(name: str, args: dict, searcher: Searcher, sources: list[dict], ui
             return {"checked_by_historian": False,
                     "automatic_links": auto, "note": "Deze brief is nog niet nagekeken: alleen automatische koppelingen."}
         return {"checked_by_historian": True, "mentions": out[:40]}
+    if name == "historian_remarks":
+        return historian_remarks(**{k: v for k, v in args.items() if k in ("kind", "query", "letter_id", "limit")})
     if name == "remember_correction":
         ctx = {} if ctx is None else ctx
         note = memory.add_note(args.get("fact", ""), args.get("letter_ids"), args.get("persons"),

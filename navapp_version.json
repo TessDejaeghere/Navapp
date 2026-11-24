@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24.4",
- "notes": "Context of a few whole sentences around every mention in the CSV (adjustable in the sidebar)"
+ "version": "2026.11.24.5",
+ "notes": "The chatbot can search the historian's remarks across the collection (e.g. doubts about the OCR)"
 }
