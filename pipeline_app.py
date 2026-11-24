@@ -509,9 +509,28 @@ def overview_metadata() -> dict[str, dict]:
         for r in df.itertuples():
             k = _dup_key(r.Ms_key)
             if k and k not in out:
-                out[k] = {"sender": r.Source, "recipient": r.Target, "date": r.Date, "archive": r.Archive,
+                out[k] = {"letter_id": r.Ms_key, "sender": r.Source, "recipient": r.Target, "date": r.Date,
+                          "archive": r.Archive,
                           "permalink": PERMALINK.format(idn=r.IDN) if r.IDN else ""}
     return out
+
+
+def nodegoat_letter_ids() -> dict[str, str]:
+    """{separator-insensitive key -> letter ID as spelled in nodegoat}, from the chatbot index (all letters,
+    also those without a transcription) and the letters overview."""
+    import sqlite3
+
+    out: dict[str, str] = {}
+    try:
+        _, indexer, _ = chatbot_modules()
+        con = sqlite3.connect(indexer.current_dir() / "chunks.db")
+        out.update({_dup_key(r[0]): r[0] for r in con.execute("SELECT letter_id FROM letters") if r[0]})
+        con.close()
+    except Exception:  # noqa: BLE001 - no index yet: fall back on the overview
+        pass
+    for k, m in overview_metadata().items():
+        out.setdefault(k, m.get("letter_id", ""))
+    return {k: v for k, v in out.items() if v}
 
 
 def chatbot_chunks(processed: list[dict], result: pd.DataFrame | None, ner_spans: dict,
@@ -519,6 +538,7 @@ def chatbot_chunks(processed: list[dict], result: pd.DataFrame | None, ner_spans
     """Chunk records for the chatbot, in the same format as the research corpus."""
     corpus, _, _ = chatbot_modules()
     ov = overview_metadata()
+    canonical = nodegoat_letter_ids()
     out = []
     for L in processed:
         lid = L["letter_id"]
@@ -533,7 +553,9 @@ def chatbot_chunks(processed: list[dict], result: pd.DataFrame | None, ner_spans
                 "date": L.get("year") or known.get("date", ""),
                 "archive": known.get("archive", ""), "permalink": known.get("permalink", "")}
         source = "corrected_htr" if checked and L["text_source"] == "opus_htr" else L["text_source"]
-        out += corpus.make_chunks(lid, L["text"], meta, persons, others, source)
+        # a zip folder cannot hold '/', so "Ms. II 70_1_23" arrives for "Ms. II 70/1/23": use nodegoat's spelling,
+        # or the chatbot would count the letter twice (metadata without text, text without metadata)
+        out += corpus.make_chunks(canonical.get(_dup_key(lid), lid), L["text"], meta, persons, others, source)
     return out
 
 

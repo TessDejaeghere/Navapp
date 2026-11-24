@@ -1,4 +1,4 @@
 {
- "version": "2026.11.24.6",
- "notes": "Every pipeline run is kept: overview of letters already processed, reopen a run, all mentions in one CSV"
+ "version": "2026.11.24.7",
+ "notes": "Letters from a zip get nodegoat's spelling of their ID when sent to the chatbot (Ms. II 70_1_23 becomes Ms. II 70/1/23)"
 }
