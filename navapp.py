@@ -9,7 +9,10 @@ from pathlib import Path
 import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+import navapp_ssl  # noqa: E402
 import navapp_update  # noqa: E402
+
+navapp_ssl.setup()   # HTTPS behind virus scanners (HTR, IIIF, LLM check)
 
 ASSETS = Path(__file__).resolve().parent / "assets"
 

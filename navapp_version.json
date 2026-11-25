@@ -1,4 +1,4 @@
 {
- "version": "2026.11.25.3",
- "notes": "Sender, recipient and year are filled in from nodegoat for known letters; sender and recipient fields now suggest nodegoat names as you type; installing new Python packages works behind virus scanners"
+ "version": "2026.11.25.4",
+ "notes": "Fix: transcription (and the IIIF download and LLM check) failed with 'Connection error' behind virus scanners that inspect HTTPS"
 }

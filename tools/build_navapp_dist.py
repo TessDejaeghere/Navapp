@@ -33,6 +33,7 @@ DIST = REPO / "dist" / "navapp"
 FILES = [
     "navapp.py",
     "navapp_update.py",                             # update check and installer (GitHub)
+    "navapp_ssl.py",                                # HTTPS behind virus scanners
     "navapp_version.json",                                    # entry: Pipeline, Chatbot, Chatbot data pages
     "pipeline_app.py",
     "navapp_pages/chat.py",

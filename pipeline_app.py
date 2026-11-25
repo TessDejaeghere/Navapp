@@ -46,6 +46,10 @@ import pandas as pd
 import streamlit as st
 
 REPO = Path(__file__).resolve().parent
+sys.path.insert(0, str(REPO))
+import navapp_ssl  # noqa: E402
+
+navapp_ssl.setup()   # HTTPS behind virus scanners; also when this page is run on its own
 sys.path.insert(0, str(REPO / "NER_pipeline"))
 sys.path.insert(0, str(REPO / "CLUSTERING_pipeline"))
 sys.path.insert(0, str(REPO / "HTR_pipeline"))

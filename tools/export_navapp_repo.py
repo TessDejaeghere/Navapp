@@ -28,7 +28,7 @@ REPO = Path(__file__).resolve().parents[1]
 
 CODE = [
     # the app
-    "navapp.py", "navapp_update.py", "navapp_version.json", "pipeline_app.py", "start_navapp.bat", ".streamlit/config.toml",
+    "navapp.py", "navapp_update.py", "navapp_ssl.py", "navapp_version.json", "pipeline_app.py", "start_navapp.bat", ".streamlit/config.toml",
     "navapp_pages/chat.py", "navapp_pages/chat_data.py",
     "assets/navapp_logo.png", "assets/navapp_frame.png", "assets/navapp_icon.png",
     "assets/navapp_mark.png", "assets/navapp_wordmark.png",

@@ -247,6 +247,12 @@ def main() -> None:
                     help="Skip the post-run refresh of letters_overview.csv and "
                          "sample_pipeline_status.csv.")
     args = ap.parse_args()
+    try:   # HTTPS behind virus scanners: let openai/httpx also trust the Windows certificate store
+        sys.path.insert(0, str(REPO))
+        import navapp_ssl
+        navapp_ssl.setup()
+    except ImportError:
+        pass
 
     # Resolve paths so relative inputs from any cwd still print/format cleanly.
     args.zip_path = args.zip_path.resolve()
