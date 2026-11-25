@@ -9,8 +9,15 @@ Identical methodology to `notebooks/htr_claude_opus.ipynb`:
   - one Claude call per *letter* (all pages of a letter passed as multi-image)
   - resumable: skips letters whose .txt already exists
 
+Preprocessing (--orient, default cascade; --orient off = the original pilot method):
+straighten pages that are scanned sideways, upside down or skewed before they
+go to Opus (see HTR_pipeline/orient_pages.py). Originals stay untouched;
+corrected copies go to `_upright_<zip-stem>/` and every decision is logged in
+`<out-dir>/orientation_log.csv`. Pages that need no change are sent as before.
+
 Usage:
     python HTR_pipeline/run_htr_opus.py data/brieven_te_HTRen/tome_1_boite_1_50_100.zip
+    python HTR_pipeline/run_htr_opus.py data/brieven_te_HTRen/tome_1_boite_1_50_100.zip --orient off
 """
 
 from __future__ import annotations
@@ -229,6 +236,13 @@ def main() -> None:
     ap.add_argument("--no-skip-manual", action="store_true",
                     help="Do NOT skip letters that are already in the manual set "
                          "(default: skip them, joined via nodegoat IDN <-> Ms_key).")
+    ap.add_argument("--orient", choices=["off", "heuristic", "hybrid", "claude", "classifier", "cascade"],
+                    default="cascade",
+                    help="Straighten rotated/skewed pages before HTR. 'cascade' = CNN classifier, "
+                         "then OpenCV, then a cheap Claude thumbnail check only when both are unsure; "
+                         "'heuristic' = OpenCV only (free); 'hybrid' = OpenCV + Claude when unsure; "
+                         "'classifier' = CNN only; 'claude' = always ask. "
+                         "Default: cascade. Use off to reproduce the pilot exactly.")
     ap.add_argument("--skip-refresh", action="store_true",
                     help="Skip the post-run refresh of letters_overview.csv and "
                          "sample_pipeline_status.csv.")
@@ -293,6 +307,14 @@ def main() -> None:
         },
     )
 
+    upright_dir = args.zip_path.parent / f"_upright_{batch_name}"
+    orient_log = out_dir / "orientation_log.csv"
+    if args.orient != "off":
+        # Imported here so the default run needs no OpenCV.
+        sys.path.insert(0, str(Path(__file__).resolve().parent))
+        from orient_pages import straighten_file
+        print(f"Orient:     {args.orient} (log: {orient_log.relative_to(REPO)})\n")
+
     ok = skipped = failed = 0
     total_in = total_out = 0
 
@@ -307,6 +329,22 @@ def main() -> None:
             skipped += 1
             continue
         t0 = time.time()
+        rotated: dict[str, str] = {}
+        if args.orient != "off":
+            fixed = []
+            for p in pages:
+                try:
+                    q, o = straighten_file(p, upright_dir, log_csv=orient_log, mode=args.orient,
+                                           api_key=api_key)
+                except Exception as e:  # never lose a letter over preprocessing
+                    print(f"    [orient] {p.name}: {type(e).__name__}: {e} — sent as is")
+                    q, o = p, None
+                if q != p:
+                    rotated[p.name] = (f"rot {o.rotation_cw} cw, skew {o.skew_deg:+.1f}"
+                                       if o else "from log")
+                    print(f"    [orient] {p.name}: {rotated[p.name]}")
+                fixed.append(q)
+            pages = fixed
         try:
             text, usage = transcribe(client, pages)
         except Exception as e:
@@ -325,6 +363,8 @@ def main() -> None:
                 "seconds":   round(dt, 2),
                 "chars_out": len(text),
                 "usage":     usage,
+                "orient":    args.orient,
+                "pages_straightened": rotated,
             }) + "\n")
         ok += 1
         print(f"  [ok]  {letter_id} ({len(pages)}p): {len(text):>5} chars / "

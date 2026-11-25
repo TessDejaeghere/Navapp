@@ -1,0 +1,9 @@
+{
+  "patch": 112,
+  "dim": 1400,
+  "epochs": 10,
+  "train_patches": 11408,
+  "test_patch_acc": 0.9038,
+  "test_page_acc": 0.968,
+  "data": "C:\\Users\\tessd\\AppData\\Local\\Temp\\claude\\0cca38dc16705f55\\0b0170f0-eb62-4052-9258-feb722410378\\scratchpad\\orientation_patches.npz"
+}

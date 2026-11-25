@@ -4,6 +4,7 @@ numpy
 requests
 openai
 pillow
+opencv-python-headless   # HTR page orientation (run_htr_opus.py --orient)
 rapidfuzz
 jellyfish
 transformers
