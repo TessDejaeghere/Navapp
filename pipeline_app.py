@@ -293,8 +293,34 @@ def record_processed(df: pd.DataFrame) -> None:
 # ---------------------------------------------------------------------------
 # Stage implementations
 # ---------------------------------------------------------------------------
-def run_htr(image_bytes: list[tuple[str, bytes]]) -> tuple[str, float]:
-    """Transcribe one letter (all its pages) with the production prompt."""
+def straighten_pages(paths: list[Path], out_dir: Path) -> tuple[list[Path], list[str]]:
+    """Turn sideways / upside-down / skewed pages upright before HTR (HTR_pipeline/orient_pages.py,
+    cascade mode). Returns the paths to send and a short note per page that was changed. Any
+    problem (missing package, odd image) leaves that page as it was: never blocks the HTR."""
+    try:
+        from orient_pages import straighten_file
+    except Exception as e:  # noqa: BLE001 - e.g. opencv not installed yet
+        log(f"page orientation skipped: {type(e).__name__}: {e}")
+        return paths, []
+    out, notes = [], []
+    for i, p in enumerate(paths, start=1):
+        try:
+            q, o = straighten_file(p, out_dir, mode="cascade", api_key=openrouter_key())
+        except Exception as e:  # noqa: BLE001
+            log(f"page {i}: orientation check failed ({type(e).__name__}: {e}); sent as is")
+            q, o = p, None
+        if o is not None and (o.rotation_cw or o.skew_deg):
+            bits = ([f"turned {o.rotation_cw}° clockwise"] if o.rotation_cw else []) + \
+                   ([f"straightened {o.skew_deg:+.1f}°"] if o.skew_deg else [])
+            notes.append(f"page {i}: " + ", ".join(bits))
+            log(notes[-1])
+        out.append(q)
+    return out, notes
+
+
+def run_htr(image_bytes: list[tuple[str, bytes]], straighten: bool = True) -> tuple[str, float, list[str]]:
+    """Transcribe one letter (all its pages) with the production prompt.
+    Returns the text, the cost, and notes on pages that were turned upright first."""
     from openai import OpenAI
 
     client = OpenAI(base_url="https://openrouter.ai/api/v1", api_key=openrouter_key(),
@@ -309,6 +335,9 @@ def run_htr(image_bytes: list[tuple[str, bytes]]) -> tuple[str, float]:
             p = Path(td) / f"page_{i:02d}{suffix}"
             p.write_bytes(data)
             paths.append(p)
+        notes: list[str] = []
+        if straighten:
+            paths, notes = straighten_pages(paths, Path(td) / "upright")
         content = [{"type": "text", "text": htr_user_prompt(len(paths))}]
         for i, p in enumerate(paths, start=1):
             if len(paths) > 1:
@@ -324,7 +353,7 @@ def run_htr(image_bytes: list[tuple[str, bytes]]) -> tuple[str, float]:
     u = resp.usage
     cost = ((u.prompt_tokens or 0) * PRICE_IN_PER_M
             + (u.completion_tokens or 0) * PRICE_OUT_PER_M) / 1e6 if u else 0.0
-    return text, cost
+    return text, cost, notes
 
 
 def run_ner(text: str) -> list[tuple[int, int, str]]:
@@ -698,6 +727,11 @@ with st.sidebar:
     do_htr = st.toggle("1 · HTR (Claude Opus)", value=True,
                        help="Transcribe uploaded images via OpenRouter.")
     st.caption(f"≈ ${HTR_COST_PER_PAGE:.3f} per page")
+    do_straighten = st.toggle("Turn pages upright first", value=True, disabled=not do_htr,
+                              help="Pages scanned sideways, upside down or crooked are turned upright "
+                                   "before HTR. A small local model decides; only for doubtful pages "
+                                   "is a cheap Claude Haiku check asked (≈ $0.0002 a page). The "
+                                   "original scans are not changed.")
     do_ner = st.toggle("2 · Entity recognition (d'AlemBERT)", value=True)
     st.caption("free — runs locally on this server")
     do_cluster = st.toggle("3 · Mention clustering", value=True,
@@ -991,7 +1025,9 @@ if letters:
             for i, L in enumerate(needs_htr):
                 with st.spinner(f"Transcribing {L['letter_id']} ({len(L['images'])} pages) …"):
                     try:
-                        L["text"], cost = run_htr(L["images"])
+                        L["text"], cost, turned = run_htr(L["images"], straighten=do_straighten)
+                        if turned:
+                            st.caption(f"↻ {L['letter_id']}: " + "; ".join(turned))
                     except Exception as e:  # noqa: BLE001
                         if getattr(e, "status_code", None) == 402:
                             st.error(

@@ -34,6 +34,8 @@ CODE = [
     "assets/navapp_mark.png", "assets/navapp_wordmark.png",
     # pipeline modules the app wraps
     "HTR_pipeline/run_htr_opus.py", "HTR_pipeline/download_kbr_iiif_batch2.py",
+    "HTR_pipeline/orient_pages.py", "HTR_pipeline/train_orientation_classifier.py", "HTR_pipeline/ORIENTATION.md",
+    "HTR_pipeline/models/orientation_cnn.pt", "HTR_pipeline/models/orientation_cnn.json",   # 1.7 MB, needed
     "NER_pipeline/predict_dalembert_corpus.py",
     "CLUSTERING_pipeline/link_persons.py", "CLUSTERING_pipeline/eval_clustering_linking.py",
     "CLUSTERING_pipeline/llm_adjudicate_shared_surnames.py",

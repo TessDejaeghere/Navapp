@@ -71,6 +71,11 @@ letters already loaded"** aan staan, dan komen ze in één batch en krijg je str
 - Brieven met scans: klik op **Transcribe … letter(s)**. De geschatte kost staat erboven (ongeveer $0,035 per
   pagina).
 - Brieven die al tekst hebben, worden overgeslagen.
+- Pagina's die zijwaarts, ondersteboven of scheef gescand zijn, worden eerst rechtgezet (schakelaar **"Turn
+  pages upright first"** in de zijbalk, staat standaard aan). Een klein model op je eigen computer beslist;
+  alleen bij twijfel wordt Claude Haiku kort geraadpleegd (ongeveer $0,0002 per pagina). Je originele scans
+  blijven onaangeroerd. Onder de brief zie je welke pagina's gedraaid zijn. Bij twijfel blijft een pagina zoals
+  ze is.
 - Je kunt elke transcriptie, afzender, ontvanger en jaar nog aanpassen in het uitklapvak van de brief.
 
 ### Stap 3: personen zoeken
