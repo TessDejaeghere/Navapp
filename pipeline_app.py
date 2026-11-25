@@ -32,6 +32,7 @@ Deploy on navapp.ugent.be instead: see comments at the bottom of this file.
 """
 from __future__ import annotations
 
+import importlib.util
 import io
 import json
 import re
@@ -732,6 +733,17 @@ with st.sidebar:
                                    "before HTR. A small local model decides; only for doubtful pages "
                                    "is a cheap Claude Haiku check asked (≈ $0.0002 a page). The "
                                    "original scans are not changed.")
+    if do_straighten and do_htr and importlib.util.find_spec("cv2") is None:
+        st.warning("Turning pages upright needs a package that is not installed yet (OpenCV). "
+                   "Until then, pages are sent as they are.")
+        if st.button("Install it now", key="install_cv2"):
+            with st.spinner("Installing OpenCV (about a minute) …"):
+                from navapp_update import install_packages
+                res = install_packages("opencv-python-headless")
+            if res == "ok":
+                importlib.invalidate_caches()
+                st.rerun()
+            st.error(f"Installing did not work: {res}")
     do_ner = st.toggle("2 · Entity recognition (d'AlemBERT)", value=True)
     st.caption("free — runs locally on this server")
     do_cluster = st.toggle("3 · Mention clustering", value=True,

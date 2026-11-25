@@ -5,7 +5,7 @@ The public repo github.com/TessDejaeghere/Navapp holds the code and navapp_versi
 navapp_version.json. Installing downloads the repo as a zip and copies its files over this
 installation, except the folders that hold the user's own data, the model and the key (those
 are not in the repo anyway; the check is a second safety net). Replaced files are kept under
-_backup/<old version>/. If requirements.txt changed, the new packages are installed as well.
+_backup/<old version>/. Afterwards pip installs whatever requirements.txt lists that is missing.
 
 Downloads go through urllib with the Windows certificate store, which also works behind virus
 scanners and proxies that break the certificate bundle shipped with `requests`.
@@ -69,6 +69,21 @@ def _protected(rel: str) -> bool:
     return rel.startswith(PROTECTED) or (rel.startswith("CLUSTERING_pipeline/") and rel.endswith(".csv"))
 
 
+def install_packages(*packages: str) -> str:
+    """pip install the given packages, or requirements.txt when none are given. Returns 'ok' or
+    'failed: <end of pip's error>'. pip is told to use the Windows certificate store (truststore),
+    like the downloads above: with its own certificate bundle, pip fails behind virus scanners and
+    proxies that inspect HTTPS ('CERTIFICATE_VERIFY_FAILED'). A pip too old for that option
+    (before 22.2) is simply run without it."""
+    what = list(packages) or ["-r", str(ROOT / "requirements.txt")]
+    base = [sys.executable, "-m", "pip", "install", "--disable-pip-version-check"]
+    r = subprocess.run(base + ["--use-feature=truststore"] + what, capture_output=True, text=True)
+    err = r.stderr.lower()
+    if r.returncode != 0 and "truststore" in err and ("invalid choice" in err or "no such option" in err):
+        r = subprocess.run(base + what, capture_output=True, text=True)
+    return "ok" if r.returncode == 0 else f"failed: {r.stderr[-500:]}"
+
+
 def install(progress=None) -> dict:
     """Download the newest version and copy it over this installation. Returns a summary."""
     say = progress or (lambda msg: None)
@@ -100,12 +115,11 @@ def install(progress=None) -> dict:
             added.append(rel)
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_bytes(data)
-    packages = ""
+    # Always run pip: when everything is installed it only checks (a few seconds, no download), and
+    # a package that failed to install during an earlier update gets a new chance.
     new_requirements = (ROOT / "requirements.txt").read_text(encoding="utf-8")
-    if new_requirements != old_requirements:
-        say("Installing new Python packages (this can take a few minutes) …")
-        r = subprocess.run([sys.executable, "-m", "pip", "install", "-r", str(ROOT / "requirements.txt")],
-                           capture_output=True, text=True)
-        packages = "ok" if r.returncode == 0 else f"failed: {r.stderr[-500:]}"
+    say("Installing new Python packages (this can take a few minutes) …" if new_requirements != old_requirements
+        else "Checking the Python packages …")
+    packages = install_packages()
     return {"from": old, "to": local_version()["version"], "changed": changed, "added": added,
             "skipped": skipped, "backup": str(backup) if changed else "", "packages": packages}

@@ -1,4 +1,4 @@
 {
- "version": "2026.11.25",
- "notes": "Sideways, upside-down or crooked scans are turned upright before transcription (switch 'Turn pages upright first' in the sidebar; originals stay untouched)"
+ "version": "2026.11.25.2",
+ "notes": "Installing new Python packages now also works behind virus scanners; if the page-turning package is missing, a button installs it"
 }
