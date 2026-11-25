@@ -53,6 +53,15 @@ Kies hoe je de brieven aanlevert:
 
 Klik daarna op **Load letter(s)**.
 
+**Afzender, ontvanger en jaar:**
+
+- Staat de brief al in nodegoat, laat die velden dan leeg. Bij het inladen vult Navapp ze in vanuit nodegoat,
+  op basis van de brief-ID (`Ms. II 70_1_23` vindt ook `Ms. II 70/1/23`) of het KBR-nummer in de
+  bestandsnaam van een scan. Wat je zelf invult, blijft staan.
+- Kent nodegoat de brief nog niet: typ een paar letters van de naam in **Sender** of **Recipient** en kies de
+  persoon uit de lijst, gespeld zoals in nodegoat. Staat de naam er niet in, typ hem dan volledig en druk
+  op Enter (**Add: …**).
+
 **Transcripties in bulk:**
 
 - Tekstbestanden (`.txt`): één brief per bestand, de bestandsnaam is de brief-ID, bv. `Letter 144.txt`. Een zip

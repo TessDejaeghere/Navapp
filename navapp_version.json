@@ -1,4 +1,4 @@
 {
- "version": "2026.11.25.2",
- "notes": "Installing new Python packages now also works behind virus scanners; if the page-turning package is missing, a button installs it"
+ "version": "2026.11.25.3",
+ "notes": "Sender, recipient and year are filled in from nodegoat for known letters; sender and recipient fields now suggest nodegoat names as you type; installing new Python packages works behind virus scanners"
 }

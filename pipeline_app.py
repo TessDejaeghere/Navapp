@@ -540,9 +540,61 @@ def overview_metadata() -> dict[str, dict]:
             k = _dup_key(r.Ms_key)
             if k and k not in out:
                 out[k] = {"letter_id": r.Ms_key, "sender": r.Source, "recipient": r.Target, "date": r.Date,
-                          "archive": r.Archive,
+                          "archive": r.Archive, "idn": r.IDN,
                           "permalink": PERMALINK.format(idn=r.IDN) if r.IDN else ""}
     return out
+
+
+@st.cache_data(ttl=600)
+def name_choices() -> list[str]:
+    """Names to pick from for sender / recipient, spelled as in nodegoat: every person in the person list
+    (with life dates) plus every sender and recipient in the letters overview (which adds institutions)."""
+    names: set[str] = set()
+    try:
+        names |= set(load_glossary()["Name"])
+    except Exception as e:  # noqa: BLE001 - no person list: the overview alone still helps
+        log(f"name list without the person list: {type(e).__name__}: {e}")
+    for m in overview_metadata().values():
+        names |= {m.get("sender", ""), m.get("recipient", "")}
+    names.discard("")
+    return sorted((n.strip() for n in names if n.strip()), key=str.lower)
+
+
+def name_field(container, label: str, value: str = "", key: str | None = None) -> str:
+    """A sender / recipient field: type a few letters to search the nodegoat names and pick one, or type a
+    name that is not in the list and press Enter."""
+    opts = name_choices()
+    value = (value or "").strip()
+    if value and value not in opts:
+        opts = [value] + opts
+    v = container.selectbox(label, opts, index=opts.index(value) if value else None, key=key,
+                            accept_new_options=True, placeholder="Type to search nodegoat names …")
+    return (v or "").strip()
+
+
+def fill_from_nodegoat(letters: list[dict]) -> int:
+    """Fill an empty sender, recipient or year from the nodegoat letters overview when the letter is known
+    there: by letter ID (separators and case ignored, so `Ms. II 70_1_23` finds `Ms. II 70/1/23`), or by the
+    KBR number in a scan name (`BE-KBR00_21329079_...`). What the user typed is never overwritten.
+    Returns the number of letters that got something."""
+    ov = overview_metadata()
+    by_idn = {m["idn"]: m for m in ov.values() if m.get("idn")}
+    n = 0
+    for L in letters:
+        m = ov.get(_dup_key(L["letter_id"]))
+        if not m:
+            hit = re.search(r"(?:^|_)(\d{7,9})(?:_|$)", L["letter_id"].strip())
+            m = by_idn.get(hit.group(1)) if hit else None
+        if not m:
+            continue
+        got = False
+        for field, value in (("sender", m.get("sender", "")), ("receiver", m.get("recipient", "")),
+                             ("year", m.get("date", "")[:4] if m.get("date", "")[:4].isdigit() else "")):
+            if value and not (L.get(field) or "").strip():
+                L[field] = value
+                got = True
+        n += got
+    return n
 
 
 def nodegoat_letter_ids() -> dict[str, str]:
@@ -813,6 +865,7 @@ with st.sidebar:
                             GLOSSARY_CSV.read_bytes())
                     GLOSSARY_CSV.write_bytes(new_gloss.getvalue())
                     linking_resources.clear()
+                    name_choices.clear()
                     st.success(f"Person list replaced ({len(df_new)} rows). "
                                "The old list is backed up in glossary/_archive/.")
                     st.rerun()
@@ -873,14 +926,14 @@ with st.form("input_form"):
                                  type=IMAGE_TYPES, accept_multiple_files=True)
         c1, c2, c3, c4 = st.columns(4)
         lid = c1.text_input("Letter ID *", placeholder="e.g. Letter 144 or Ms. II 70/1/23")
-        sender = c2.text_input("Sender", placeholder="as in nodegoat, incl. dates")
-        receiver = c3.text_input("Recipient", placeholder="e.g. François-Joseph Navez (1787-1869)")
+        sender = name_field(c2, "Sender")
+        receiver = name_field(c3, "Recipient")
         year = c4.text_input("Year", placeholder="e.g. 1824")
     elif mode == "Zip with several letters":
         zfile = st.file_uploader("Zip — one folder per letter, or files named `<letter>_<page>.jpg`",
                                  type=["zip"])
-        st.caption("Sender/recipient/year can be filled in per letter after transcription. "
-                   "For very large batches (1 GB+), prefer 'Folder on this computer'.")
+        st.caption("Sender/recipient/year are taken from nodegoat for letters it knows; the rest can be "
+                   "filled in per letter after loading. For very large batches (1 GB+), prefer 'Folder on this computer'.")
     elif mode == "Folder on this computer":
         folder = st.text_input("Folder path",
                                placeholder=r"e.g. C:\Users\fien\Pictures\new_batch")
@@ -890,8 +943,8 @@ with st.form("input_form"):
     elif mode == "IIIF manifest URL":
         c1, c2, c3, c4 = st.columns(4)
         lid = c1.text_input("Letter ID *", placeholder="e.g. Ms. II 70/4/330")
-        sender = c2.text_input("Sender")
-        receiver = c3.text_input("Recipient")
+        sender = name_field(c2, "Sender")
+        receiver = name_field(c3, "Recipient")
         year = c4.text_input("Year")
         iiif_url = st.text_input("Manifest URL(s)",
                                  placeholder="https://iiif.kbr.be/manifest/v3/846164 "
@@ -900,8 +953,8 @@ with st.form("input_form"):
     elif mode == "Paste an existing transcription":
         c1, c2, c3, c4 = st.columns(4)
         lid = c1.text_input("Letter ID *")
-        sender = c2.text_input("Sender")
-        receiver = c3.text_input("Recipient")
+        sender = name_field(c2, "Sender")
+        receiver = name_field(c3, "Recipient")
         year = c4.text_input("Year")
         pasted = st.text_area("Transcription", height=200)
     else:
@@ -910,8 +963,11 @@ with st.form("input_form"):
         st.caption("**Text files:** one letter per file; the file name is the letter ID "
                    "(e.g. `Letter 144.txt`). **Table:** one letter per row, with a column `letter_id` "
                    "and a column `text` (or `transcription`), and optionally `sender`, `recipient` and "
-                   "`year`. Missing senders, recipients and years can be filled in below, or are taken "
-                   "from the nodegoat overview when the letters go to the chatbot.")
+                   "`year`. Missing senders, recipients and years are taken from nodegoat for letters "
+                   "it knows; the rest can be filled in below.")
+    if mode in ("Images of one letter", "IIIF manifest URL", "Paste an existing transcription"):
+        st.caption("Leave sender, recipient and year empty if the letter is in nodegoat: they are filled "
+                   "in from there when you load it.")
     add_to_batch = False
     if st.session_state.letters:
         add_to_batch = st.checkbox(
@@ -1004,6 +1060,11 @@ if submitted:
             elif tfiles:
                 st.error("No transcriptions found in these files.")
 
+    filled = fill_from_nodegoat(st.session_state.letters)
+    if filled:
+        st.info(f"Sender, recipient and/or year filled in from nodegoat for {filled} letter(s). "
+                "You can still change them per letter below.")
+
     if previous:
         new_ids = {L["letter_id"] for L in st.session_state.letters}
         kept = [L for L in previous if L["letter_id"] not in new_ids]
@@ -1067,10 +1128,8 @@ if letters:
             L["text"] = st.text_area("Transcription (editable before entity extraction)",
                                      value=L["text"], height=220, key=f"txt_{L['letter_id']}")
             c1, c2, c3 = st.columns(3)
-            L["sender"] = c1.text_input("Sender", value=L.get("sender", ""),
-                                        key=f"snd_{L['letter_id']}")
-            L["receiver"] = c2.text_input("Recipient", value=L.get("receiver", ""),
-                                          key=f"rcv_{L['letter_id']}")
+            L["sender"] = name_field(c1, "Sender", L.get("sender", ""), key=f"snd_{L['letter_id']}")
+            L["receiver"] = name_field(c2, "Recipient", L.get("receiver", ""), key=f"rcv_{L['letter_id']}")
             L["year"] = c3.text_input("Year", value=L.get("year", ""),
                                       key=f"yr_{L['letter_id']}")
 
