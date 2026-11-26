@@ -85,6 +85,10 @@ letters already loaded"** aan staan, dan komen ze in één batch en krijg je str
   alleen bij twijfel wordt Claude Haiku kort geraadpleegd (ongeveer $0,0002 per pagina). Je originele scans
   blijven onaangeroerd. Onder de brief zie je welke pagina's gedraaid zijn. Bij twijfel blijft een pagina zoals
   ze is.
+- Tekst die dwars of ondersteboven op een verder rechte pagina staat (vooral het adres op de buitenkant van een
+  gevouwen brief, of een naschrift in de marge), wordt apart uitgeknipt, rechtgedraaid en mee naar Claude
+  gestuurd. Zo leest Opus het adres veel beter: anders verzint het soms een verkeerde naam. Het adres komt
+  onderaan de transcriptie als `[Address: …]`. Ook dit hoort bij de schakelaar **"Turn pages upright first"**.
 - Je kunt elke transcriptie, afzender, ontvanger en jaar nog aanpassen in het uitklapvak van de brief.
 
 ### Stap 3: personen zoeken

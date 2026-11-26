@@ -139,3 +139,48 @@ is the same as no preprocessing, so it does less harm than a wrong turn.
   as a sure answer.
 - Weakest hands for every mode: du Bus de Gisignies, Voisin, Vanden Berghe,
   Potvin. These are sparse or very slanted pages.
+
+## Side panels: address panels and margin text (Nov 2026)
+
+Folded letters often carry the address at a right angle to the letter, and
+postscripts or margin notes run sideways or upside down. Turning the page
+cannot make both upright. So after the page is straightened,
+`orient_pages.find_panels` looks for blocks of sideways or upside-down text.
+Each block is cut out, turned upright and sent to Opus right after its page,
+with a line saying it is a cut-out of that page and should be transcribed
+from the cut-out, once, as `[Address:]`, `[PS:]` or `[Margin:]`. The
+production prompt itself is unchanged. Pages without such text are sent
+exactly as before.
+
+**Detection.** The CNN judges every ink patch on a grid (56 px steps at
+1,400 px). Patches it is sure about (p > 0.8) seed a block. Neighbouring
+patches that lean the same way (p > 0.6) join it. A block counts with at
+least 2 sure patches (3 for upside-down text, where a date line was once
+taken for upside-down text) and at least 4 patches. The page must also hold
+at least half as many sure-upright patches. The crop adds 1 patch of margin
+across the lines and 3 along them, because line ends trail off. It takes
+about 0.8 s per page on a laptop CPU.
+
+**Tests.**
+
+| | result |
+|---|---|
+| Opus, 19 address panels, asked for the address only: right recipient | 5 whole page, 2 crop left sideways, 11 crop turned upright |
+| Detector, 73 hand-labelled pages | 27 of 29 pages with sideways text found, 0 of 43 false alarms (an earlier, stricter rule: 23 of 29) |
+| Detector, 150 fresh pages | 17 flagged, all genuine |
+| Full HTR, 8 pages with an address panel, page alone vs page + cut-out | recipient right on 8 of 8 with the cut-out, against 5 of 8; no address written twice |
+
+- On the whole page, Opus often writes a plausible but wrong name instead of
+  `[...]`: Wiertz, Paelinck, Stappaerts or Mathieu for "Monsieur Navez".
+  Those names would end up as person mentions.
+- Still missed: very faint panels (light grey ink, pencil). The classifier
+  hardly sees them as sideways. Such pages go to Opus as before.
+- How often panels occur: about 5% of pages in the old scan, about 11% with
+  the current rule on a fresh sample. Upside-down lines and margin text are
+  counted too.
+
+CLI: `run_htr_opus.py` sends cut-outs by default (`--no-panels` turns that
+off; `--orient off` turns off both). The cut-outs are saved next to the
+upright copies as `<page>_panel<n>.jpg`, and `usage.jsonl` lists them per
+letter under `side_panels`. In the app they go with the switch "Turn pages
+upright first".

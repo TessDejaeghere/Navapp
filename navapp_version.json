@@ -1,4 +1,4 @@
 {
- "version": "2026.11.25.4",
- "notes": "Fix: transcription (and the IIIF download and LLM check) failed with 'Connection error' behind virus scanners that inspect HTTPS"
+ "version": "2026.11.26",
+ "notes": "Sideways or upside-down text on a page (the address of a folded letter, margin notes) is cut out, turned upright and sent along, so the transcription gets the address right"
 }

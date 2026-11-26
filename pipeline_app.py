@@ -57,7 +57,7 @@ sys.path.insert(0, str(REPO / "HTR_pipeline"))
 # production pipeline pieces (no logic duplicated here)
 from run_htr_opus import (  # noqa: E402
     MODEL_SLUG, PRICE_IN_PER_M, PRICE_OUT_PER_M, SYSTEM_PROMPT as HTR_PROMPT,
-    image_to_data_uri, user_prompt as htr_user_prompt,
+    user_content as htr_user_content,
 )
 from predict_dalembert_corpus import (  # noqa: E402
     BASE_MODEL, encode_letter, decode_windows_to_spans, load_model,
@@ -323,6 +323,29 @@ def straighten_pages(paths: list[Path], out_dir: Path) -> tuple[list[Path], list
     return out, notes
 
 
+def cut_side_panels(paths: list[Path], out_dir: Path) -> tuple[dict[int, list[Path]], list[str]]:
+    """Cut sideways / upside-down text (address panels, margin notes) out of the upright pages and turn it
+    upright, to send next to the page (HTR_pipeline/orient_pages.find_panels). Never blocks the HTR."""
+    try:
+        from orient_pages import save_panels
+    except Exception as e:  # noqa: BLE001 - e.g. opencv or torch not installed yet
+        log(f"side panels skipped: {type(e).__name__}: {e}")
+        return {}, []
+    panels, notes = {}, []
+    for i, p in enumerate(paths, start=1):
+        try:
+            cuts = save_panels(p, out_dir)
+        except Exception as e:  # noqa: BLE001
+            log(f"page {i}: side-panel check failed ({type(e).__name__}: {e})")
+            cuts = []
+        if cuts:
+            panels[i] = cuts
+            notes.append(f"page {i}: {len(cuts)} sideways or upside-down text block(s) (e.g. the address) "
+                         "cut out and turned upright")
+            log(notes[-1])
+    return panels, notes
+
+
 def run_htr(image_bytes: list[tuple[str, bytes]], straighten: bool = True) -> tuple[str, float, list[str]]:
     """Transcribe one letter (all its pages) with the production prompt.
     Returns the text, the cost, and notes on pages that were turned upright first."""
@@ -341,13 +364,12 @@ def run_htr(image_bytes: list[tuple[str, bytes]], straighten: bool = True) -> tu
             p.write_bytes(data)
             paths.append(p)
         notes: list[str] = []
+        panels: dict[int, list[Path]] = {}
         if straighten:
             paths, notes = straighten_pages(paths, Path(td) / "upright")
-        content = [{"type": "text", "text": htr_user_prompt(len(paths))}]
-        for i, p in enumerate(paths, start=1):
-            if len(paths) > 1:
-                content.append({"type": "text", "text": f"--- Page {i} of {len(paths)} ---"})
-            content.append({"type": "image_url", "image_url": {"url": image_to_data_uri(p)}})
+            panels, panel_notes = cut_side_panels(paths, Path(td) / "panels")
+            notes += panel_notes
+        content = htr_user_content(paths, panels)
         resp = client.chat.completions.create(
             model=MODEL_SLUG,
             messages=[{"role": "system", "content": HTR_PROMPT},
@@ -787,8 +809,10 @@ with st.sidebar:
     do_straighten = st.toggle("Turn pages upright first", value=True, disabled=not do_htr,
                               help="Pages scanned sideways, upside down or crooked are turned upright "
                                    "before HTR. A small local model decides; only for doubtful pages "
-                                   "is a cheap Claude Haiku check asked (≈ $0.0002 a page). The "
-                                   "original scans are not changed.")
+                                   "is a cheap Claude Haiku check asked (≈ $0.0002 a page). Text that "
+                                   "runs sideways on an upright page, such as the address of a folded "
+                                   "letter, is also cut out, turned upright and sent along, so Opus can "
+                                   "read it. The original scans are not changed.")
     if do_straighten and do_htr and importlib.util.find_spec("cv2") is None:
         st.warning("Turning pages upright needs a package that is not installed yet (OpenCV). "
                    "Until then, pages are sent as they are.")

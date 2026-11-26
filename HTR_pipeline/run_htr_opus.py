@@ -191,12 +191,30 @@ def manually_transcribed_kbr_ids(nodegoat_csv: Path, manual_dir: Path) -> set[st
     return skip
 
 
-def transcribe(client: OpenAI, image_paths: list[Path]) -> tuple[str, dict]:
+PANEL_NOTE = ("--- Cut-out from page {i}: text that runs sideways or upside down on that page (an address "
+              "panel, a postscript or a margin note), cut out and turned upright so it can be read. Transcribe "
+              "this text from this cut-out, not from the page itself, and only once; place it as the rules say "
+              "([Address: ...], [PS: ...] or [Margin: ...]). ---")
+
+
+def user_content(image_paths: list[Path], panels: dict[int, list[Path]] | None = None) -> list[dict]:
+    """The user message: the prompt, every page image, and after a page the upright cut-outs of its
+    sideways / upside-down text (see orient_pages.find_panels). The system prompt is unchanged."""
+    panels = panels or {}
     content: list[dict] = [{"type": "text", "text": user_prompt(len(image_paths))}]
     for i, img in enumerate(image_paths, start=1):
-        if len(image_paths) > 1:
+        if len(image_paths) > 1 or panels:
             content.append({"type": "text", "text": f"--- Page {i} of {len(image_paths)} ---"})
         content.append({"type": "image_url", "image_url": {"url": image_to_data_uri(img)}})
+        for cut in panels.get(i, []):
+            content.append({"type": "text", "text": PANEL_NOTE.format(i=i)})
+            content.append({"type": "image_url", "image_url": {"url": image_to_data_uri(cut)}})
+    return content
+
+
+def transcribe(client: OpenAI, image_paths: list[Path],
+               panels: dict[int, list[Path]] | None = None) -> tuple[str, dict]:
+    content = user_content(image_paths, panels)
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {"role": "user", "content": content},
@@ -243,6 +261,9 @@ def main() -> None:
                          "'heuristic' = OpenCV only (free); 'hybrid' = OpenCV + Claude when unsure; "
                          "'classifier' = CNN only; 'claude' = always ask. "
                          "Default: cascade. Use off to reproduce the pilot exactly.")
+    ap.add_argument("--no-panels", action="store_true",
+                    help="Do not send cut-outs of sideways / upside-down text (address panels, margin notes) "
+                         "turned upright next to the page. On by default unless --orient off.")
     ap.add_argument("--skip-refresh", action="store_true",
                     help="Skip the post-run refresh of letters_overview.csv and "
                          "sample_pipeline_status.csv.")
@@ -318,8 +339,10 @@ def main() -> None:
     if args.orient != "off":
         # Imported here so the default run needs no OpenCV.
         sys.path.insert(0, str(Path(__file__).resolve().parent))
-        from orient_pages import straighten_file
-        print(f"Orient:     {args.orient} (log: {orient_log.relative_to(REPO)})\n")
+        from orient_pages import save_panels, straighten_file
+        print(f"Orient:     {args.orient} (log: {orient_log.relative_to(REPO)})")
+        print(f"Side panels: {'off' if args.no_panels else 'cut out and turned upright'}\n")
+    use_panels = args.orient != "off" and not args.no_panels
 
     ok = skipped = failed = 0
     total_in = total_out = 0
@@ -351,8 +374,19 @@ def main() -> None:
                     print(f"    [orient] {p.name}: {rotated[p.name]}")
                 fixed.append(q)
             pages = fixed
+        panels: dict[int, list[Path]] = {}
+        if use_panels:
+            for i, p in enumerate(pages, start=1):
+                try:
+                    cuts = save_panels(p, upright_dir)
+                except Exception as e:  # never lose a letter over preprocessing
+                    print(f"    [panels] {p.name}: {type(e).__name__}: {e} — none sent")
+                    cuts = []
+                if cuts:
+                    panels[i] = cuts
+                    print(f"    [panels] {p.name}: {len(cuts)} side panel(s) cut out and turned upright")
         try:
-            text, usage = transcribe(client, pages)
+            text, usage = transcribe(client, pages, panels)
         except Exception as e:
             print(f"  [FAIL] {letter_id} ({len(pages)}p): {type(e).__name__}: {e}")
             failed += 1
@@ -371,6 +405,7 @@ def main() -> None:
                 "usage":     usage,
                 "orient":    args.orient,
                 "pages_straightened": rotated,
+                "side_panels": {pages[i - 1].name: [c.name for c in cs] for i, cs in panels.items()},
             }) + "\n")
         ok += 1
         print(f"  [ok]  {letter_id} ({len(pages)}p): {len(text):>5} chars / "

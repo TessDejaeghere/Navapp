@@ -357,6 +357,107 @@ def classifier_rotation(im: Image.Image, n: int = CLF_PATCHES, seed: int = 0) ->
     return (90 * k) % 360, float(logp.exp().mean(0)[k])
 
 
+# --------------------------------------------------------------------------- side panels
+# Text that runs sideways or upside down on an otherwise upright page: the address panel of a
+# folded letter, a postscript in the margin, lines written upside down along the top. Opus reads
+# such text badly in place (on 19 address panels it named the right recipient 5 times, and often
+# invented a name); cut out and turned upright, 11 times. The detector lets the CNN judge every
+# patch on a grid and grows blocks of patches that agree on one non-upright direction.
+# Tuned on 73 hand-labelled pages (27/29 found, 0/43 false alarms) and checked on 150 fresh pages.
+PANEL_STRIDE = 56            # grid step at CLF_DIM
+PANEL_SURE = 0.80            # a seed patch is this sure of its direction
+PANEL_LEAN = 0.60            # a neighbour leaning the same way (above this) joins the block
+PANEL_MIN_SEEDS = {1: 2, 2: 3, 3: 2}   # upside-down blocks need more evidence (dates looked upside down)
+PANEL_MIN_SIZE = 4           # patches in a block
+PANEL_UP_RATIO = 0.5         # the page needs sure-upright patches >= this x block size
+PANEL_PAD_ACROSS, PANEL_PAD_ALONG = 1, 3   # margin in patches; line ends trail off, so more along the lines
+
+
+@dataclass
+class Panel:
+    rotation_cw: int                     # clockwise turn that makes the panel upright
+    box: tuple[int, int, int, int]       # x0, y0, x1, y1 in the page's own pixels
+    seeds: int
+    size: int
+
+
+def find_panels(im: Image.Image) -> list[Panel]:
+    """Blocks of sideways or upside-down text on an (upright) page. Empty list when there are none
+    or when the page is (nearly) blank. Needs torch and the classifier model."""
+    import torch
+    import torch.nn.functional as F
+    g = _to_gray_small(im, CLF_DIM)
+    mask = ink_mask(g)
+    if mask.mean() < MIN_INK_FRACTION:
+        return []
+    P, H, S = CLF_PATCH, CLF_PATCH // 2, PANEL_STRIDE
+    dens = cv2.boxFilter(mask.astype(np.float32), -1, (P, P))
+    pts = np.array([(y, x) for y in range(H, g.shape[0] - H, S) for x in range(H, g.shape[1] - H, S)
+                    if dens[y, x] > 0.04])
+    if len(pts) < PANEL_MIN_SIZE:
+        return []
+    with torch.no_grad():
+        pr = F.softmax(_load_classifier()(patches_to_tensor(
+            np.stack([g[y - H:y + H, x - H:x + H] for y, x in pts]))), 1).numpy()
+    k, p = pr.argmax(1), pr.max(1)
+    n_up = int(((k == 0) & (p > PANEL_SURE)).sum())
+    scale = max(im.size) / max(g.shape)
+    out = []
+    for d in (1, 2, 3):
+        member = (k == d) & (p > PANEL_LEAN)
+        seed = member & (p > PANEL_SURE)
+        lab = -np.ones(len(pts), int)
+        c = 0
+        for i in np.nonzero(seed)[0]:
+            if lab[i] >= 0:
+                continue
+            stack = [i]
+            lab[i] = c
+            while stack:
+                j = stack.pop()
+                near = np.nonzero(member & (lab < 0) & (np.abs(pts - pts[j]).max(1) <= 1.5 * S))[0]
+                lab[near] = c
+                stack += list(near)
+            c += 1
+        for b in range(c):
+            m = lab == b
+            n_seed, n = int((seed & m).sum()), int(m.sum())
+            if n_seed < PANEL_MIN_SEEDS[d] or n < PANEL_MIN_SIZE or n_up < PANEL_UP_RATIO * n:
+                continue
+            (y0, x0), (y1, x1) = pts[m].min(0) - H, pts[m].max(0) + H
+            # sideways text (d = 1, 3) has its lines running vertically on the page
+            px, py = (PANEL_PAD_ACROSS, PANEL_PAD_ALONG) if d in (1, 3) else (PANEL_PAD_ALONG, PANEL_PAD_ACROSS)
+            x0, x1 = x0 - px * P, x1 + px * P
+            y0, y1 = y0 - py * P, y1 + py * P
+            box = (max(0, int(x0 * scale)), max(0, int(y0 * scale)),
+                   min(im.width, int(x1 * scale)), min(im.height, int(y1 * scale)))
+            # label d = text turned d x 90 degrees counter-clockwise -> turn it back clockwise
+            out.append(Panel(rotation_cw=(90 * d) % 360, box=box, seeds=n_seed, size=n))
+    return sorted(out, key=lambda q: (q.box[1], q.box[0]))
+
+
+def panel_images(im: Image.Image) -> list[tuple[Panel, Image.Image]]:
+    """Each side panel of an upright page, cut out and turned upright."""
+    return [(q, _rotate_cw(im.crop(q.box), q.rotation_cw)) for q in find_panels(im)]
+
+
+def save_panels(src: Path, out_dir: Path) -> list[Path]:
+    """Cut the side panels out of an upright page, turn them upright and save them as
+    <out_dir>/<stem>_panel<n>.jpg. Returns the saved paths (empty when the page has none)."""
+    with Image.open(src) as im:
+        im = ImageOps.exif_transpose(im).convert("RGB")
+        cuts = panel_images(im)
+    if not cuts:
+        return []
+    out_dir.mkdir(parents=True, exist_ok=True)
+    paths = []
+    for n, (_, cut) in enumerate(cuts, start=1):
+        p = out_dir / f"{src.stem}_panel{n}.jpg"
+        cut.save(p, quality=92)
+        paths.append(p)
+    return paths
+
+
 # --------------------------------------------------------------------------- main API
 def _rotate_cw(im: Image.Image, deg: int) -> Image.Image:
     return {0: im, 90: im.transpose(Image.ROTATE_270),
