@@ -89,6 +89,7 @@ letters already loaded"** aan staan, dan komen ze in één batch en krijg je str
   gevouwen brief, of een naschrift in de marge), wordt apart uitgeknipt, rechtgedraaid en mee naar Claude
   gestuurd. Zo leest Opus het adres veel beter: anders verzint het soms een verkeerde naam. Het adres komt
   onderaan de transcriptie als `[Address: …]`. Ook dit hoort bij de schakelaar **"Turn pages upright first"**.
+  Hoe goed beide werken, lees je in [hoofdstuk 8](#8-hoe-goed-werkt-het-rechtzetten).
 - Je kunt elke transcriptie, afzender, ontvanger en jaar nog aanpassen in het uitklapvak van de brief.
 
 ### Stap 3: personen zoeken
@@ -173,3 +174,60 @@ kunnen ze niet aanpassen. Gesprekken en brieven worden nooit gepubliceerd.
 
 Kosten in het kort: transcriptie ongeveer $0,035 per pagina, een chatvraag een paar cent, de pipeline (stap 3)
 gratis.
+
+---
+
+## 8. Hoe goed werkt het rechtzetten?
+
+De cijfers hieronder komen uit tests in november 2026. Daarvoor werden echte scans uit het corpus met opzet
+gedraaid en scheefgezet, waarna Navapp ze moest rechtzetten.
+
+### Hele pagina's rechtzetten
+
+**Test op handschriften die het model nooit zag.** 50 schrijvers, 121 pagina's. Elke pagina werd 0, 90, 180 en
+270 graden gedraaid en 0, +3 en −5 graden scheefgezet: 1.452 gevallen per methode. Tussen haakjes staat de
+onzekerheidsmarge (95%-interval, berekend over de schrijvers).
+
+| Methode | Juist | Verkeerd gedraaid | Rechte pagina per vergissing gedraaid | Vragen aan Claude |
+|---|---|---|---|---|
+| Alleen beeldanalyse (OpenCV) | 76,4% (70–83) | 13 | 3 van 363 | 0 |
+| Alleen het kleine model | 70,2% (64–76) | **0** | **0** van 363 | 0 |
+| Beeldanalyse + Claude | 93,9% (90–97) | 89 | 16 van 363 | 957 |
+| **Wat Navapp nu gebruikt** | **94,6%** | **15** | **5** van 363 | 290 |
+
+Wat Navapp nu gebruikt, werkt in drie stappen. Eerst beslist het kleine model op je eigen computer. Is het niet
+zeker, dan kijkt de beeldanalyse. Twijfelt die ook, dan wordt Claude Haiku kort geraadpleegd.
+
+- Als het kleine model beslist, heeft het altijd gelijk: 864 van de 864 keer. Het houdt zich in bij twijfel,
+  ongeveer 30% van de tijd.
+- Een gok van Claude telt alleen als het kleine model het ermee eens is. Bij twijfel blijft een pagina zoals ze
+  is: dat is hetzelfde als vroeger, zonder rechtzetten.
+- Een eerdere, kleinere test (444 gevallen) haalde 100% met beeldanalyse + Claude. Die pagina's waren
+  makkelijker.
+- Na het rechtzetten staat een pagina gemiddeld nog 0,1 graad scheef. Minder dan 1 graad wordt bewust niet
+  gecorrigeerd.
+- Kosten: ongeveer één vraag aan Claude Haiku per vijf gedraaide pagina's, telkens zo'n $0,0002.
+
+### Adressen en tekst in de marge
+
+| Test | Resultaat |
+|---|---|
+| Claude leest 19 adressen: juiste ontvanger | hele pagina **5**, uitgeknipt maar nog dwars **2**, uitgeknipt en rechtgedraaid **11** |
+| Vindt Navapp de dwarse tekst? 73 pagina's, één voor één met het oog nagekeken | **27 van 29** gevonden, **0 van 43** vals alarm |
+| Zelfde vraag, 150 nieuwe pagina's | 17 aangeduid, **alle 17 terecht** |
+| Volledige transcriptie van 8 pagina's met een adres | juiste ontvanger **8 van 8** met uitknipsel, tegenover 5 van 8 zonder; geen enkel adres dubbel |
+
+- Zonder uitknipsel verzint Opus vaak een naam die er wel geloofwaardig uitziet. Op adressen voor "Monsieur
+  Navez" werd dat onder meer Wiertz, Paelinck of Mathieu. Zo'n naam belandt dan als persoon in je CSV. Met het
+  uitknipsel gebeurt dat veel minder.
+- Heel vaal geschreven adressen, in lichtgrijze inkt of potlood, worden nog gemist. Die pagina's gaan zoals
+  vroeger naar Claude.
+- Uitknippen kost ongeveer 1 seconde per pagina, op je eigen computer.
+
+### Goed om te weten
+
+- De tests zijn klein. De richting is duidelijk, maar de precieze percentages kunnen wat schuiven.
+- "Schrijver" betekent hier de afzender in nodegoat. Een secretaris of kopiist kan zich achter één afzender
+  verbergen.
+- Brieven die vóór deze update getranscribeerd werden, kunnen nog een verzonnen naam in het adres hebben.
+- Meer technische details staan in `HTR_pipeline/ORIENTATION.md`.
