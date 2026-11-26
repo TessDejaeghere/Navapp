@@ -1,4 +1,4 @@
 {
- "version": "2026.11.26",
- "notes": "Sideways or upside-down text on a page (the address of a folded letter, margin notes) is cut out, turned upright and sent along, so the transcription gets the address right"
+ "version": "2026.11.26.2",
+ "notes": "Chatbot data: download the full transcriptions (one .txt per letter + CSV)"
 }

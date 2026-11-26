@@ -37,6 +37,30 @@ else:
 if msg := st.session_state.pop("removed_msg", None):
     st.success(msg)
 
+
+@st.cache_data(show_spinner=False)
+def _transcriptions(which: str, version: str, n_uploads: int) -> tuple[bytes, int]:
+    """ZIP of full transcriptions; cached per index version and number of uploads."""
+    source = ingest.load_uploads() if which == "sent" else indexer.all_chunks()[0]
+    letters = ingest.letter_texts(source)
+    return ingest.transcriptions_zip(letters), len(letters)
+
+
+st.subheader("Export transcriptions")
+st.caption("Download the full text of the letters as they are in the chatbot: one .txt file per letter, "
+           "plus a CSV with sender, recipient, date, the kind of transcription and the text.")
+which = st.radio("Which letters", ["sent", "all"], horizontal=True, key="export_which",
+                 format_func=lambda w: (f"Letters I sent ({len(uploads):,})" if w == "sent"
+                                        else "All letters in the chatbot"))
+if which == "sent" and not uploads:
+    st.info("You have not sent any letters yet.")
+else:
+    with st.spinner("Preparing the transcriptions …"):
+        data, n_letters = _transcriptions(which, indexer.current_dir().name, len(uploads))
+    st.download_button(f"⬇️ Download transcriptions ({n_letters:,} letters, ZIP)", data,
+                       file_name=f"navapp_transcriptions_{which}.zip", mime="application/zip",
+                       key="export_transcriptions")
+
 st.subheader("Checked persons (OpenRefine export)")
 from rag import corrections  # noqa: E402
 

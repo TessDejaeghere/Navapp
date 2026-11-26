@@ -58,3 +58,68 @@ def uploaded_letters() -> list[dict]:
             "date": r["date"], "transcription": r["text_source"], "chunks": 0, "added": r.get("added", "")})
         row["chunks"] += 1
     return sorted(rows.values(), key=lambda x: x["added"], reverse=True)
+
+
+# -- export of full transcriptions -------------------------------------------------
+TEXT_STATUS = {"corrected_htr": "HTR, corrected", "manual": "manual transcription",
+               "opus_htr": "HTR, not corrected"}
+
+
+def letter_texts(chunks: list[dict]) -> list[dict]:
+    """Put the overlapping chunks of each letter back together into its full text.
+
+    Each chunk carries its offset in the letter ("start"), so overlapping chunks are
+    joined at that offset. Older records without an offset are joined with a blank line.
+    """
+    by_letter: dict[str, list[dict]] = {}
+    for c in chunks:
+        by_letter.setdefault(c["letter_id"], []).append(c)
+    out = []
+    for lid, cs in by_letter.items():
+        cs.sort(key=lambda c: (c.get("start", c.get("chunk", 0)), c.get("chunk", 0)))
+        text = ""
+        for c in cs:
+            start = c.get("start")
+            if start is None:
+                text = f"{text}\n\n{c['text']}" if text else c["text"]
+            elif start <= len(text):
+                text = text[:start] + c["text"]
+            else:                       # whitespace between two chunks was stripped
+                text = text + "\n" * min(start - len(text), 2) + c["text"]
+        first = cs[0]
+        out.append({"letter_id": lid, "sender": first.get("sender", ""), "recipient": first.get("recipient", ""),
+                    "date": first.get("date", ""), "archive": first.get("archive", ""),
+                    "transcription": TEXT_STATUS.get(first.get("text_source", ""), first.get("text_source", "")),
+                    "added": first.get("added", ""), "permalink": first.get("permalink", ""),
+                    "text": text.strip()})
+    return sorted(out, key=lambda r: r["letter_id"])
+
+
+def _file_name(letter_id: str) -> str:
+    keep = "".join(ch if ch.isalnum() or ch in " .-_" else "_" for ch in letter_id)
+    return keep.strip() or "letter"
+
+
+def transcriptions_zip(letters: list[dict]) -> bytes:
+    """ZIP with one .txt per letter plus transcriptions.csv (metadata and full text)."""
+    import csv
+    import io
+    import zipfile
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        used: set[str] = set()
+        for r in letters:
+            name, n = _file_name(r["letter_id"]), 2
+            base = name
+            while name in used:
+                name, n = f"{base}_{n}", n + 1
+            used.add(name)
+            z.writestr(f"transcriptions/{name}.txt", r["text"] + "\n")
+        sheet = io.StringIO()
+        cols = ["letter_id", "sender", "recipient", "date", "archive", "transcription", "added", "permalink", "text"]
+        w = csv.DictWriter(sheet, fieldnames=cols, extrasaction="ignore")
+        w.writeheader()
+        w.writerows(letters)
+        z.writestr("transcriptions.csv", "﻿" + sheet.getvalue())
+    return buf.getvalue()
