@@ -1,4 +1,4 @@
 {
- "version": "2026.11.26.2",
- "notes": "Chatbot data: download the full transcriptions (one .txt per letter + CSV)"
+ "version": "2026.11.26.3",
+ "notes": "Pipeline: a table showing where each batch stands (OpenRefine, checked, in the chatbot, published); an OpenRefine export is checked against its batch and warns when it looks filtered"
 }

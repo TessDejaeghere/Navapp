@@ -91,8 +91,29 @@ if corr_up is not None:
                    f"{summary.get('artwork', 0)} artworks, {summary.get('place', 0)} places, "
                    f"{summary.get('open', 0):,} mentions left as they were (kept as a name in the text, "
                    "without a person).")
+        from rag import batches  # noqa: E402
+        chk = batches.check_export(records)
+        if chk["batches"]:
+            st.markdown("**Which batch this export belongs to:** " + "; ".join(
+                f"run of {b['run']} ({b['letters in export']} of its {b['letters in batch']} letters)"
+                for b in chk["batches"]))
+        if chk["outside"]:
+            st.caption(f"{len(chk['outside'])} letter(s) are not from a Navapp pipeline run (e.g. an earlier batch); "
+                       "they are imported as usual.")
+        if chk["short"]:
+            miss = sum(x["in batch"] - x["in export"] for x in chk["short"])
+            st.warning(f"⚠️ For {len(chk['short'])} letter(s) this export has fewer mentions than the pipeline "
+                       f"found ({miss:,} missing). Was a filter on in OpenRefine when you exported? The readings "
+                       "of the missing mentions would be lost for those letters. To be safe, remove all filters "
+                       "in OpenRefine and export again.")
+            st.dataframe(pd.DataFrame(chk["short"]).drop(columns="batch"), hide_index=True, width="stretch",
+                         height=min(38 + 35 * len(chk["short"]), 240))
         if st.button(f"✅ Use these corrections for {summary['letters']:,} letters", type="primary"):
             corrections.save(records, summary, corr_up.name)
+            try:
+                batches.mark("corrections_in", [b["batch"] for b in chk["batches"]], corr_up.name)
+            except Exception:  # noqa: BLE001 - the status table must never block an import
+                pass
             bar = st.progress(0.0, "Updating the index …")
             try:
                 s3 = indexer.rebuild_index(progress=lambda f, m: bar.progress(min(max(f, 0.0), 1.0), m))
@@ -247,6 +268,11 @@ with st.expander("⬆️ Publish my corrections (for Fien)"):
             with st.spinner("Publishing …"):
                 try:
                     m = sharing.publish(by.strip())
+                    try:
+                        from rag import batches  # noqa: E402
+                        batches.mark("published", None, by.strip())
+                    except Exception:  # noqa: BLE001
+                        pass
                     st.cache_data.clear()
                     st.success(f"Published on {m['published'][:16].replace('T', ' ')}. Other Navapps will see a notice.")
                 except Exception as e:  # noqa: BLE001

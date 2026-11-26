@@ -235,6 +235,12 @@ def save_run(df: pd.DataFrame, letters: list[dict], ner_spans: dict) -> str:
         "letters": letters, "mentions": len(df),
         "ner_spans": {k: [list(x) for x in v] for k, v in ner_spans.items() if k in ids},
     }, ensure_ascii=False), encoding="utf-8")
+    try:
+        counts = {lid: 0 for lid in ids}
+        counts.update(df.groupby("letter_id").size().to_dict())
+        batches_module().register_run(stamp, datetime.datetime.now().isoformat(timespec="seconds"), counts)
+    except Exception as e:  # noqa: BLE001 - the run itself is saved; the status table can catch up later
+        log(f"batch not registered: {e}")
     return stamp
 
 
@@ -262,6 +268,7 @@ def reopen_run(stamp: str) -> None:
                                           encoding="utf-8-sig").fillna("")[CSV_COLUMNS]
     st.session_state.ner_spans = {k: [tuple(x) for x in v] for k, v in meta.get("ner_spans", {}).items()}
     st.session_state.pop("chatbot_sent", None)
+    st.session_state.run_stamp = stamp
     for k in list(st.session_state.keys()):
         if k.startswith(("txt_", "snd_", "rcv_", "yr_")):
             del st.session_state[k]
@@ -547,6 +554,29 @@ def link_mentions(df: pd.DataFrame, clusters: pd.Series) -> pd.DataFrame:
 # ---------------------------------------------------------------------------
 # Hand-over to the Navapp chatbot
 # ---------------------------------------------------------------------------
+def chatbot_corrections():
+    if str(CHATBOT_DIR) not in sys.path:
+        sys.path.insert(0, str(CHATBOT_DIR))
+    from rag import corrections
+    return corrections
+
+
+def batches_module():
+    """chatbot/rag/batches.py: where every batch stands (SQLite in chatbot/data)."""
+    if str(CHATBOT_DIR) not in sys.path:
+        sys.path.insert(0, str(CHATBOT_DIR))
+    from rag import batches
+    return batches
+
+
+def mark_csv_out(stamps: list[str]) -> None:
+    """Called when a mention CSV is downloaded: those batches now wait on the historian (OpenRefine)."""
+    try:
+        batches_module().mark("csv_out", [x for x in stamps if x])
+    except Exception as e:  # noqa: BLE001 - the status table must never block a download
+        log(f"batch status not recorded: {e}")
+
+
 def chatbot_modules():
     """The chatbot's corpus, indexer and ingest modules (chatbot/rag)."""
     if str(CHATBOT_DIR) not in sys.path:
@@ -919,6 +949,22 @@ if runs:
                                   "in the chatbot": "yes" if _dup_key(lid) in in_chat else "no"}
                                  for lid, r in sorted(seen.items(), key=lambda x: x[1]["when"], reverse=True)])
         st.dataframe(overview, hide_index=True, width="stretch", height=min(38 + 35 * len(overview), 300))
+        try:
+            bm = batches_module()
+            bm.sync_runs(RUNS_DIR)
+            corrected = {bm.key(r["letter_id"]) for r in chatbot_corrections().load(include_shared=False)}
+            status = bm.overview(corrected, bm.chatbot_letter_keys())
+        except Exception as e:  # noqa: BLE001
+            status = []
+            log(f"batch status unavailable: {e}")
+        if status:
+            st.markdown("**Where each batch stands**")
+            waiting = [r for r in status if r["status"].startswith("⏳")]
+            if waiting:
+                st.caption(f"{len(waiting)} batch(es) with the historian in OpenRefine. When her export is back, "
+                           "load it on the Chatbot data page; Navapp checks it against its batch.")
+            st.dataframe(pd.DataFrame(status).drop(columns="batch"), hide_index=True, width="stretch",
+                         height=min(38 + 35 * len(status), 300))
         labels = {r["stamp"]: f"{r['when'].replace('T', ' ')[:16]} — {len(r['letter_ids'])} letter(s), "
                               f"{r['mentions']} mentions: {', '.join(r['letter_ids'][:3])}"
                               f"{' …' if len(r['letter_ids']) > 3 else ''}" for r in runs}
@@ -928,7 +974,8 @@ if runs:
             reopen_run(pick)
             st.rerun()
         c3.download_button("⬇️ Its CSV", (RUNS_DIR / f"{pick}.csv").read_bytes(),
-                           file_name=f"mentions_{pick}.csv", mime="text/csv")
+                           file_name=f"mentions_{pick}.csv", mime="text/csv",
+                           on_click=mark_csv_out, args=([pick],))
         frames = [pd.read_csv(RUNS_DIR / f"{r['stamp']}.csv", dtype=str, encoding="utf-8-sig").fillna("")
                   .assign(_run=r["stamp"]) for r in runs if (RUNS_DIR / f"{r['stamp']}.csv").exists()]
         if frames:   # a letter run more than once keeps only the mentions of its latest run
@@ -938,7 +985,8 @@ if runs:
             st.download_button(f"⬇️ All mentions of all runs ({allm['letter_id'].nunique()} letters, "
                                f"{len(allm)} mentions) as one CSV",
                                allm.to_csv(index=False).encode("utf-8-sig"),
-                               file_name="mentions_all_runs.csv", mime="text/csv")
+                               file_name="mentions_all_runs.csv", mime="text/csv",
+                               on_click=mark_csv_out, args=(sorted(set(latest.values())),))
 
 st.subheader("Step 1 — letter input")
 mode = st.radio("Input type",
@@ -1214,7 +1262,8 @@ if letters:
             st.session_state.adj_notes = notes
             record_processed(df)
             try:
-                save_run(df[CSV_COLUMNS], st.session_state.processed, st.session_state.get("ner_spans", {}))
+                st.session_state.run_stamp = save_run(df[CSV_COLUMNS], st.session_state.processed,
+                                                      st.session_state.get("ner_spans", {}))
             except OSError as e:
                 st.warning(f"The run could not be saved to disk ({e}); download the CSV below.")
 
@@ -1235,7 +1284,8 @@ if "result" in st.session_state:
     st.download_button(
         "⬇️ Download mention CSV",
         df.to_csv(index=False).encode("utf-8-sig"),
-        file_name="mentions.csv", mime="text/csv", type="primary")
+        file_name="mentions.csv", mime="text/csv", type="primary",
+        on_click=mark_csv_out, args=([st.session_state.get("run_stamp", "")],))
 
 if st.session_state.get("processed"):
     st.subheader("Step 4 — send to the Navapp chatbot")

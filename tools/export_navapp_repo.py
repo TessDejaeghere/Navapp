@@ -43,6 +43,7 @@ CODE = [
     "chatbot/rag/__init__.py", "chatbot/rag/agent.py", "chatbot/rag/answer.py", "chatbot/rag/corpus.py",
     "chatbot/rag/indexer.py", "chatbot/rag/ingest.py", "chatbot/rag/openrouter.py", "chatbot/rag/search.py",
     "chatbot/rag/stats.py", "chatbot/rag/corrections.py", "chatbot/rag/memory.py", "chatbot/rag/sharing.py",
+    "chatbot/rag/batches.py",
     "chatbot/scripts/ask.py", "chatbot/scripts/ask_tools.py", "chatbot/scripts/build_corpus.py",
     "chatbot/scripts/build_index.py", "chatbot/scripts/eval_bot.py", "chatbot/scripts/eval_counts.py",
     "chatbot/app/chainlit_app.py", "chatbot/Start_NavappBot.bat", "chatbot/chainlit.md",
